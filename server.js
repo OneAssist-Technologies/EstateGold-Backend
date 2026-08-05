@@ -5,6 +5,7 @@ const cors = require("cors");
 const path = require("path");
 
 const connectDB = require("./config/db");
+const seedAdmin = require("./seed/createAdmin");
 
 const authRoutes = require("./src/routes/authRoutes");
 const propertyRoutes = require("./src/routes/propertyRoutes");
@@ -12,8 +13,10 @@ const adminRoutes = require("./src/routes/adminRoutes");
 
 const app = express();
 
-// Database Connection
-connectDB();
+// Database Connection & Auto Seeding
+connectDB().then(() => {
+  seedAdmin();
+});
 
 // Middleware
 app.use(cors());

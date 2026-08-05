@@ -18,93 +18,100 @@ const generateToken = (
   );
 };
 
-exports.register =
-  async (req, res) => {
-    try {
-      const {
-        fullName,
-        email,
-        phone,
-        password,
-        role,
-        ownerName,
-        agencyName,
-        reraNumber,
-      } = req.body;
+exports.register = async (req, res) => {
+  try {
+    const {
+      fullName,
+      email,
+      phone,
+      password,
+      role = "buyer",
+      ownerName,
+      agencyName,
+      reraNumber,
+    } = req.body;
 
-      const existingUser =
-        await User.findOne({
-          $or: [
-            { email },
-            { phone },
-          ],
-        });
-
-      if (existingUser) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "User already exists",
-          });
-      }
-
-      const hashedPassword =
-        await bcrypt.hash(
-          password,
-          10
-        );
-
-      const user =
-        await User.create({
-          fullName,
-          email,
-          phone,
-          password:
-            hashedPassword,
-          role,
-
-          ownerName:
-            role === "seller"
-              ? ownerName
-              : "",
-
-          agencyName:
-            role === "agent"
-              ? agencyName
-              : "",
-
-          reraNumber:
-            role === "agent"
-              ? reraNumber
-              : "",
-        });
-if (role === "admin") {
-  return res.status(403).json({
-    success: false,
-    message: "Admin registration is not allowed.",
-  });
-}
-      const token =
-        generateToken(
-          user._id,
-          user.role
-        );
-
-      res.status(201).json({
-        success: true,
-        token,
-        user,
-      });
-    } catch (error) {
-      res.status(500).json({
+    if (role === "admin") {
+      return res.status(403).json({
         success: false,
-        message:
-          error.message,
+        message: "Admin registration is not allowed.",
       });
     }
-  };
+
+    if (!fullName || !email || !phone || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Full Name, Email, Phone Number, and Password are required.",
+      });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a valid email address.",
+      });
+    }
+
+    const cleanPhone = phone.replace(/[\s\-\(\)]/g, "");
+    if (!/^\d{10}$/.test(cleanPhone)) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number must be exactly 10 digits.",
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters long.",
+      });
+    }
+
+    const existingUser = await User.findOne({
+      $or: [{ email: email.toLowerCase() }, { phone: cleanPhone }],
+    });
+
+    if (existingUser) {
+      if (existingUser.email === email.toLowerCase()) {
+        return res.status(400).json({
+          success: false,
+          message: "Email is already registered.",
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        message: "Phone number is already registered.",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const user = await User.create({
+      fullName,
+      email: email.toLowerCase(),
+      phone: cleanPhone,
+      password: hashedPassword,
+      role,
+      ownerName: role === "seller" ? ownerName || "" : "",
+      agencyName: role === "agent" ? agencyName || "" : "",
+      reraNumber: role === "agent" ? reraNumber || "" : "",
+    });
+
+    const token = generateToken(user._id, user.role);
+
+    res.status(201).json({
+      success: true,
+      token,
+      user,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message || "Registration failed",
+    });
+  }
+};
 
 exports.login =
   async (req, res) => {

@@ -53,4 +53,9 @@ router.delete(
   controller.deleteProperty
 );
 
+// User Management Routes
+router.get("/users", auth, admin, controller.getUsers);
+router.patch("/users/:id/verify", auth, admin, controller.toggleUserVerify);
+router.patch("/users/:id/status", auth, admin, controller.toggleUserStatus);
+
 module.exports = router;
