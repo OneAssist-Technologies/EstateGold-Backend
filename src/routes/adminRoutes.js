@@ -57,5 +57,6 @@ router.delete(
 router.get("/users", auth, admin, controller.getUsers);
 router.patch("/users/:id/verify", auth, admin, controller.toggleUserVerify);
 router.patch("/users/:id/status", auth, admin, controller.toggleUserStatus);
+router.delete("/users/:id", auth, admin, controller.deleteUser);
 
 module.exports = router;

@@ -329,9 +329,16 @@ exports.getUsers = async (req, res) => {
       .limit(Number(limit));
 
     const totalBuyers = await User.countDocuments({ role: "buyer" });
+    const verifiedBuyers = await User.countDocuments({ role: "buyer", isVerified: true });
+
     const totalSellers = await User.countDocuments({ role: "seller" });
+    const verifiedSellers = await User.countDocuments({ role: "seller", isVerified: true });
+
+    const totalAgents = await User.countDocuments({ role: "agent" });
     const verifiedAgents = await User.countDocuments({ role: "agent", isVerified: true });
+
     const totalUsers = await User.countDocuments();
+    const verifiedUsers = await User.countDocuments({ isVerified: true });
 
     res.json({
       success: true,
@@ -341,9 +348,13 @@ exports.getUsers = async (req, res) => {
       users,
       stats: {
         totalBuyers,
+        verifiedBuyers,
         totalSellers,
+        verifiedSellers,
+        totalAgents,
         verifiedAgents,
         totalUsers,
+        verifiedUsers,
       },
     });
   } catch (error) {
@@ -379,18 +390,61 @@ exports.toggleUserVerify = async (req, res) => {
 
 exports.toggleUserStatus = async (req, res) => {
   try {
+    const { reason } = req.body;
     const user = await User.findById(req.params.id);
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    user.isActive = !user.isActive;
+    if (user.isActive) {
+      if (!reason || !reason.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Please provide a reason to suspend this user.",
+        });
+      }
+      user.isActive = false;
+      user.suspendReason = reason.trim();
+    } else {
+      user.isActive = true;
+      user.suspendReason = "";
+    }
+
     await user.save();
 
     res.json({
       success: true,
       message: `User status updated to ${user.isActive ? "active" : "suspended"}`,
       user,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.deleteUser = async (req, res) => {
+  try {
+    const { reason } = req.body;
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a reason to delete this user.",
+      });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    await User.findByIdAndDelete(req.params.id);
+
+    res.json({
+      success: true,
+      message: "User deleted successfully",
     });
   } catch (error) {
     res.status(500).json({

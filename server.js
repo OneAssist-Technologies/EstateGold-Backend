@@ -10,6 +10,7 @@ const seedAdmin = require("./seed/createAdmin");
 const authRoutes = require("./src/routes/authRoutes");
 const propertyRoutes = require("./src/routes/propertyRoutes");
 const adminRoutes = require("./src/routes/adminRoutes");
+const locationRoutes = require("./src/routes/locationRoutes");
 
 const app = express();
 
@@ -39,17 +40,13 @@ app.use(
   )
 );
 
+app.use("/admin/locations", locationRoutes);
 app.use("/admin", adminRoutes);
 
 // Routes
-app.use(
-  authRoutes
-);
-
-app.use(
- propertyRoutes 
-  
-);
+app.use(authRoutes);
+app.use(propertyRoutes);
+app.use("/api/locations", locationRoutes);
 
 // Health Check
 app.get("/", (req, res) => {
