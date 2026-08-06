@@ -71,6 +71,16 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+
+    suspendReason: {
+      type: String,
+      default: "",
+    },
+
+    deletedReason: {
+      type: String,
+      default: "",
+    },
   },
   {
     timestamps: true,
