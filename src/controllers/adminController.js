@@ -1,5 +1,6 @@
 const Property = require("../models/Property");
 const User = require("../models/User");
+const RoleRequest = require("../models/RoleRequest");
 
 exports.getDashboard = async (req, res) => {
   try {
@@ -25,6 +26,11 @@ exports.getDashboard = async (req, res) => {
     const users =
       await User.countDocuments();
 
+    const pendingRoleRequests =
+      await RoleRequest.countDocuments({
+        status: "pending",
+      });
+
     res.json({
       success: true,
 
@@ -34,6 +40,7 @@ exports.getDashboard = async (req, res) => {
         approved,
         rejected,
         users,
+        pendingRoleRequests,
       },
     });
 
@@ -121,16 +128,24 @@ exports.getProperties = async (req, res) => {
         .skip(skip)
         .limit(limit);
 
+    const totalCount = await Property.countDocuments({ isDeleted: false });
+    const pendingCount = await Property.countDocuments({ isDeleted: false, status: "pending" });
+    const approvedCount = await Property.countDocuments({ isDeleted: false, status: "approved" });
+    const rejectedCount = await Property.countDocuments({ isDeleted: false, status: "rejected" });
+
     res.json({
       success: true,
       total,
       page,
-      pages: Math.ceil(
-        total / limit
-      ),
+      pages: Math.ceil(total / limit),
       properties,
+      stats: {
+        total: totalCount,
+        pending: pendingCount,
+        approved: approvedCount,
+        rejected: rejectedCount,
+      },
     });
-
   } catch (error) {
 
     res.status(500).json({
@@ -373,6 +388,13 @@ exports.toggleUserVerify = async (req, res) => {
     }
 
     user.isVerified = !user.isVerified;
+    if (user.isVerified) {
+      user.verificationStatus = "approved";
+      user.isActive = true;
+      user.rejectionReason = "";
+    } else {
+      user.verificationStatus = "pending";
+    }
     await user.save();
 
     res.json({
