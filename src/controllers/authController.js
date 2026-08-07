@@ -2,6 +2,8 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
+const RoleRequest = require("../models/RoleRequest");
+
 const generateToken = (
   userId,
   role
@@ -29,6 +31,9 @@ exports.register = async (req, res) => {
       ownerName,
       agencyName,
       reraNumber,
+      experience,
+      reason,
+      documents,
     } = req.body;
 
     if (role === "admin") {
@@ -87,15 +92,23 @@ exports.register = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    const isAgent = role === "agent";
+    const verificationStatus = isAgent ? "pending" : "none";
+
     const user = await User.create({
       fullName,
       email: email.toLowerCase(),
       phone: cleanPhone,
       password: hashedPassword,
       role,
+      roles: [role],
+      verificationStatus,
+      isVerified: !isAgent, // Agent requires admin verification in User Management
+      experience: isAgent ? experience || "" : "",
+      documents: isAgent && Array.isArray(documents) ? documents : [],
       ownerName: role === "seller" ? ownerName || "" : "",
-      agencyName: role === "agent" ? agencyName || "" : "",
-      reraNumber: role === "agent" ? reraNumber || "" : "",
+      agencyName: isAgent ? agencyName || "" : "",
+      reraNumber: isAgent ? reraNumber || "" : "",
     });
 
     const token = generateToken(user._id, user.role);

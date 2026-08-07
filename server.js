@@ -11,6 +11,7 @@ const authRoutes = require("./src/routes/authRoutes");
 const propertyRoutes = require("./src/routes/propertyRoutes");
 const adminRoutes = require("./src/routes/adminRoutes");
 const locationRoutes = require("./src/routes/locationRoutes");
+const roleRequestRoutes = require("./src/routes/roleRequestRoutes");
 
 const app = express();
 
@@ -47,6 +48,9 @@ app.use("/admin", adminRoutes);
 app.use(authRoutes);
 app.use(propertyRoutes);
 app.use("/api/locations", locationRoutes);
+app.use("/role-requests", roleRequestRoutes);
+app.use("/api/role-requests", roleRequestRoutes);
+app.use("/admin/role-requests-api", roleRequestRoutes);
 
 // Health Check
 app.get("/", (req, res) => {

@@ -37,6 +37,36 @@ const userSchema = new mongoose.Schema(
       required: true,
     },
 
+    roles: [
+      {
+        type: String,
+        enum: ["buyer", "seller", "agent", "admin"],
+      },
+    ],
+
+    verificationStatus: {
+      type: String,
+      enum: ["none", "pending", "approved", "rejected"],
+      default: "none",
+    },
+
+    rejectionReason: {
+      type: String,
+      default: "",
+    },
+
+    experience: {
+      type: String,
+      default: "",
+    },
+
+    documents: [
+      {
+        name: { type: String, default: "" },
+        url: { type: String, default: "" },
+      },
+    ],
+
     ownerName: {
       type: String,
       default: "",

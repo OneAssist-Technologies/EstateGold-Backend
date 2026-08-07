@@ -21,6 +21,14 @@ const propertySchema =
       agentRelation: String,
       ownerIdType: String,
       ownerIdNumber: String,
+      ownerGovtIdDoc: String,
+      ownerAddress: String,
+
+      listingType: {
+        type: String,
+        enum: ["my_own", "another_owner"],
+        default: "my_own",
+      },
 
       city: String,
       locality: String,
