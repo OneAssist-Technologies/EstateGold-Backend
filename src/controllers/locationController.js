@@ -1,4 +1,5 @@
 const Location = require("../models/Location");
+const Property = require("../models/Property");
 
 // Create Location
 exports.createLocation = async (req, res) => {
@@ -134,14 +135,49 @@ exports.getLocations = async (req, res) => {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
+    // 1. Sync Active Listing Counts & Link serviceableAreaId for all locations first
+    const allLocations = await Location.find();
+    for (const loc of allLocations) {
+      if (loc.city) {
+        // Retroactively link any properties matching this city name
+        await Property.updateMany(
+          {
+            isDeleted: false,
+            $or: [
+              { serviceableAreaId: { $exists: false } },
+              { serviceableAreaId: null },
+            ],
+            city: { $regex: new RegExp(`^${loc.city.trim()}$`, "i") },
+          },
+          {
+            $set: { serviceableAreaId: loc._id },
+          }
+        );
+      }
+
+      const count = await Property.countDocuments({
+        isDeleted: false,
+        $or: [
+          { serviceableAreaId: loc._id },
+          ...(loc.city
+            ? [{ city: { $regex: new RegExp(`^${loc.city.trim()}$`, "i") } }]
+            : []),
+        ],
+      });
+
+      if (loc.activeListings !== count) {
+        loc.activeListings = count;
+        await loc.save();
+      }
+    }
+
+    // 2. Fetch paginated locations with updated activeListings
     const total = await Location.countDocuments(query);
     const locations = await Location.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNum);
 
-    // Compute Stats
-    const allLocations = await Location.find();
     const stats = {
       totalCities: allLocations.length,
       activeCities: allLocations.filter((l) => l.status === "active").length,
@@ -223,5 +259,41 @@ exports.deleteLocation = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Request Service Area from Admin
+exports.requestServiceArea = async (req, res) => {
+  try {
+    const { city, state, locality, address, latitude, longitude, notes } = req.body;
+    const requestedCity = (city || locality || "Requested Area").trim();
+
+    const existing = await Location.findOne({
+      city: { $regex: new RegExp(`^${requestedCity}$`, "i") },
+    });
+
+    if (!existing) {
+      await Location.create({
+        city: requestedCity,
+        state: state || "Tamil Nadu",
+        country: "India",
+        latitude: Number(latitude) || 13.0827,
+        longitude: Number(longitude) || 80.2707,
+        radiusKm: 10,
+        status: "inactive",
+        notes: `User Requested Service Area: ${address || locality || requestedCity}. ${notes || ""}`,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Your location request has been submitted to the admin successfully!",
+    });
+  } catch (error) {
+    console.error("Request Service Area Error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to submit location request",
+    });
   }
 };
