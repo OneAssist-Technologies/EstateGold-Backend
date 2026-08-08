@@ -34,6 +34,12 @@ const propertySchema =
       locality: String,
       society: String,
       address: String,
+      latitude: Number,
+      longitude: Number,
+      serviceableAreaId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Location",
+      },
 
       bedrooms: Number,
       bathrooms: Number,

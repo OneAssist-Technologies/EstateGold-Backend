@@ -4,53 +4,90 @@ const RoleRequest = require("../models/RoleRequest");
 
 exports.getDashboard = async (req, res) => {
   try {
+    const totalProperties = await Property.countDocuments({ isDeleted: false });
+    const pending = await Property.countDocuments({ isDeleted: false, status: "pending" });
+    const approved = await Property.countDocuments({ isDeleted: false, status: "approved" });
+    const rejected = await Property.countDocuments({ isDeleted: false, status: "rejected" });
+    const users = await User.countDocuments();
+    const verifiedAgents = await User.countDocuments({ role: "agent", isVerified: true });
+    const pendingRoleRequests = await RoleRequest.countDocuments({ status: "pending" });
 
-    const totalProperties =
-      await Property.countDocuments();
+    // Property breakdown by type
+    const propertyTypeCounts = await Property.aggregate([
+      { $match: { isDeleted: false } },
+      { $group: { _id: "$propertyType", count: { $sum: 1 } } }
+    ]);
 
-    const pending =
-      await Property.countDocuments({
-        status: "pending",
+    // Monthly property additions for the trailing 12 months
+    const now = new Date();
+    const twelveMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+
+    const rawMonthlyStats = await Property.aggregate([
+      {
+        $match: {
+          isDeleted: false,
+          createdAt: { $gte: twelveMonthsAgo }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$createdAt" },
+            month: { $month: "$createdAt" }
+          },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthlyMap = new Map();
+    rawMonthlyStats.forEach((item) => {
+      const key = `${item._id.year}-${item._id.month}`;
+      monthlyMap.set(key, item.count);
+    });
+
+    const monthlyStats = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = d.getFullYear();
+      const monthNum = d.getMonth() + 1;
+      const key = `${year}-${monthNum}`;
+      monthlyStats.push({
+        month: monthNames[d.getMonth()],
+        properties: monthlyMap.get(key) || 0,
       });
+    }
 
-    const approved =
-      await Property.countDocuments({
-        status: "approved",
-      });
-
-    const rejected =
-      await Property.countDocuments({
-        status: "rejected",
-      });
-
-    const users =
-      await User.countDocuments();
-
-    const pendingRoleRequests =
-      await RoleRequest.countDocuments({
-        status: "pending",
-      });
+    // Pending properties for quick approval card
+    const pendingProperties = await Property.find({ isDeleted: false, status: "pending" })
+      .populate("createdBy", "fullName email phone role agencyName")
+      .sort({ createdAt: -1 })
+      .limit(5);
 
     res.json({
       success: true,
-
       data: {
         totalProperties,
         pending,
         approved,
         rejected,
         users,
+        verifiedAgents,
         pendingRoleRequests,
+        propertyTypes: propertyTypeCounts.map((pt) => ({
+          type: pt._id || "Other",
+          count: pt.count,
+        })),
+        monthlyStats,
+        pendingProperties,
       },
     });
-
   } catch (error) {
-
     res.status(500).json({
       success: false,
       message: error.message,
     });
-
   }
 };
 

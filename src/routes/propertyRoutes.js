@@ -4,7 +4,9 @@ const {
   createProperty,
   getProperties,
   getPropertyById,
+  getSimilarProperties,
   getMyProperties,
+  getMyPublishedCount,
   filterProperties,
   searchProperties,
   approveProperty,
@@ -42,12 +44,30 @@ router.get(
 );
 
 router.get(
+  "/my-published-count",
+  auth,
+  getMyPublishedCount
+);
+
+router.get(
+  "/properties/similar/:id",
+  getSimilarProperties
+);
+
+router.get(
   "/properties/:id",
   getPropertyById
 );
 
 router.get(
   "/my-properties/:userId",
+  auth,
+  getMyProperties
+);
+
+router.get(
+  "/my-properties",
+  auth,
   getMyProperties
 );
 
@@ -70,7 +90,6 @@ router.patch(
   "/reject-property/:id",
   rejectProperty
 );
-router.get("/my-properties", getMyProperties);
 
 router.put("/properties/:id", updateProperty);
 
