@@ -171,9 +171,10 @@ exports.getLocations = async (req, res) => {
       }
     }
 
-    // 2. Fetch paginated locations with updated activeListings
+    // 2. Fetch paginated locations with updated activeListings & populated requestedBy user
     const total = await Location.countDocuments(query);
     const locations = await Location.find(query)
+      .populate("requestedBy", "fullName email phone role")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNum);
@@ -215,7 +216,7 @@ exports.getLocations = async (req, res) => {
 // Get Location By ID
 exports.getLocationById = async (req, res) => {
   try {
-    const location = await Location.findById(req.params.id);
+    const location = await Location.findById(req.params.id).populate("requestedBy", "fullName email phone role");
     if (!location) {
       return res.status(404).json({ success: false, message: "Location not found" });
     }
@@ -232,7 +233,7 @@ exports.updateLocation = async (req, res) => {
       req.params.id,
       { $set: req.body },
       { new: true }
-    );
+    ).populate("requestedBy", "fullName email phone role");
     if (!location) {
       return res.status(404).json({ success: false, message: "Location not found" });
     }
@@ -282,7 +283,18 @@ exports.requestServiceArea = async (req, res) => {
         radiusKm: 10,
         status: "inactive",
         notes: `User Requested Service Area: ${address || locality || requestedCity}. ${notes || ""}`,
+        requestedBy: req.user ? req.user._id : null,
+        requestedAddress: address || "",
+        requestedLocality: locality || "",
       });
+    } else if (existing.status === "inactive") {
+      existing.notes = `User Requested Service Area: ${address || locality || requestedCity}. ${notes || ""}`;
+      if (req.user) existing.requestedBy = req.user._id;
+      if (address) existing.requestedAddress = address;
+      if (locality) existing.requestedLocality = locality;
+      if (latitude) existing.latitude = Number(latitude);
+      if (longitude) existing.longitude = Number(longitude);
+      await existing.save();
     }
 
     res.status(200).json({

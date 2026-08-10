@@ -87,6 +87,18 @@ const locationSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    requestedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    requestedAddress: {
+      type: String,
+      default: "",
+    },
+    requestedLocality: {
+      type: String,
+      default: "",
+    },
   },
   {
     timestamps: true,

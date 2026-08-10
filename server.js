@@ -33,12 +33,8 @@ app.use(
 
 app.use(
   "/uploads",
-  express.static(
-    path.join(
-      __dirname,
-      "uploads"
-    )
-  )
+  express.static(path.join(__dirname, "uploads")),
+  express.static(path.join(__dirname, "../uploads"))
 );
 
 app.use("/admin/locations", locationRoutes);

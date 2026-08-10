@@ -39,8 +39,10 @@ exports.createProperty =
       const property =
         await Property.create({
           ...req.body,
+          ownerId: req.body.ownerId || req.user._id || req.user.id,
           createdBy: req.user._id || req.user.id,
           status: "approved",
+          availabilityStatus: req.body.availabilityStatus || "on_sale",
           latitude: serviceCheck.latitude,
           longitude: serviceCheck.longitude,
           serviceableAreaId: serviceCheck.matchedLocation._id,
@@ -126,11 +128,20 @@ exports.getProperties = async (req, res) => {
       minPrice,
       maxPrice,
       sort,
+      availabilityStatus,
     } = req.query;
 
     const query = {
-      status: "approved",
+      isDeleted: { $ne: true },
+      status: { $in: ["approved", "active", "published"] },
     };
+
+    if (availabilityStatus && availabilityStatus !== "") {
+      query.availabilityStatus = availabilityStatus;
+    } else {
+      // Exclude sold properties from active public property listings
+      query.availabilityStatus = { $ne: "sold" };
+    }
 
     // Search
 
@@ -166,7 +177,14 @@ exports.getProperties = async (req, res) => {
     // Purpose
 
     if (purpose && purpose !== "") {
-      query.purpose = purpose;
+      const purpTrim = purpose.trim().toLowerCase();
+      if (purpTrim === "rent" || purpTrim === "for rent" || purpTrim === "lease") {
+        query.purpose = { $regex: /rent|lease/i };
+      } else if (purpTrim === "buy" || purpTrim === "sale" || purpTrim === "sell" || purpTrim === "for sale") {
+        query.purpose = { $regex: /buy|sale|sell/i };
+      } else {
+        query.purpose = { $regex: new RegExp(purpose, "i") };
+      }
     }
 
     // City
@@ -276,9 +294,13 @@ exports.getProperties = async (req, res) => {
         ...property.toObject(),
 
         photos:
-          property.photos.map(
-            (photo) =>
-              `${baseUrl}/uploads/properties/${photo}`
+          (property.photos || []).map(
+            (photo) => {
+              if (!photo) return "";
+              if (photo.startsWith("http://") || photo.startsWith("https://")) return photo;
+              const clean = photo.replace(/^\/+/, "").replace(/^uploads\/properties\//, "").replace(/^uploads\//, "");
+              return `${baseUrl}/uploads/properties/${clean}`;
+            }
           ),
       }));
 
@@ -336,12 +358,24 @@ exports.getPropertyById = async (req, res) => {
 
     const baseUrl = `${req.protocol}://${req.get("host")}`;
 
-    const propertyData = {
-      ...property.toObject(),
+    const rawObj = property.toObject();
+    const ownerIdVal = property.ownerId
+      ? (property.ownerId._id || property.ownerId).toString()
+      : property.createdBy
+      ? (property.createdBy._id || property.createdBy).toString()
+      : "";
 
-      photos: property.photos.map(
-        (photo) =>
-          `${baseUrl}/uploads/properties/${photo}`
+    const propertyData = {
+      ...rawObj,
+      ownerId: ownerIdVal,
+
+      photos: (property.photos || []).map(
+        (photo) => {
+          if (!photo) return "";
+          if (photo.startsWith("http://") || photo.startsWith("https://")) return photo;
+          const clean = photo.replace(/^\/+/, "").replace(/^uploads\/properties\//, "").replace(/^uploads\//, "");
+          return `${baseUrl}/uploads/properties/${clean}`;
+        }
       ),
     };
 
@@ -387,15 +421,25 @@ exports.getMyProperties = async (req, res) => {
     const limit = Number(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const { search } = req.query;
+    const { search, status } = req.query;
     const userId = req.user._id || req.user.id;
 
     // Filter properties created by currently authenticated user
     const query = {
       createdBy: { $in: [userId, String(userId)] },
-      status: { $in: ["approved", "active", "published", "pending"] },
       isDeleted: { $ne: true },
     };
+
+    if (status && status !== "" && status !== "all") {
+      const st = status.toLowerCase();
+      if (st === "active") {
+        query.status = { $in: ["approved", "active", "published"] };
+      } else if (st === "inactive") {
+        query.status = { $in: ["inactive", "disabled"] };
+      } else {
+        query.status = st;
+      }
+    }
 
     if (search) {
       query.$or = [
@@ -433,32 +477,41 @@ exports.getMyProperties = async (req, res) => {
 
     const formattedProperties = properties.map((property) => ({
       ...property.toObject(),
-      photos: property.photos.map((photo) =>
-        photo.startsWith("http")
-          ? photo
-          : `${baseUrl}/uploads/properties/${photo}`
-      ),
+      photos: (property.photos || []).map((photo) => {
+        if (!photo) return "";
+        if (photo.startsWith("http://") || photo.startsWith("https://")) return photo;
+        const clean = photo.replace(/^\/+/, "").replace(/^uploads\/properties\//, "").replace(/^uploads\//, "");
+        return `${baseUrl}/uploads/properties/${clean}`;
+      }),
     }));
 
-    const publishedCount = await Property.countDocuments({
+    const allUserProperties = await Property.find({
       createdBy: { $in: [userId, String(userId)] },
-      status: { $in: ["approved", "active", "published", "pending"] },
       isDeleted: { $ne: true },
     });
 
+    const activeList = allUserProperties.filter((p) =>
+      ["approved", "active", "published"].includes(p.status)
+    );
+    const inactiveList = allUserProperties.filter((p) =>
+      ["inactive", "disabled"].includes(p.status)
+    );
+    const pendingList = allUserProperties.filter((p) => p.status === "pending");
+    const rejectedList = allUserProperties.filter((p) => p.status === "rejected");
+
     const counts = {
-      all: publishedCount,
-      active: publishedCount,
-      pending: 0,
-      inactive: 0,
-      rejected: 0,
+      all: allUserProperties.length,
+      active: activeList.length,
+      inactive: inactiveList.length,
+      pending: pendingList.length,
+      rejected: rejectedList.length,
     };
 
     return res.status(200).json({
       success: true,
       data: formattedProperties,
       counts,
-      hasPublishedProperties: publishedCount > 0,
+      hasPublishedProperties: allUserProperties.length > 0,
       pagination: {
         page,
         limit,
