@@ -3,8 +3,8 @@ const fs = require("fs");
 const path = require("path");
 
 const uploadPath = path.join(
-  __dirname,
-  "../../uploads/properties"
+  process.cwd(),
+  "uploads/properties"
 );
 
 if (!fs.existsSync(uploadPath)) {

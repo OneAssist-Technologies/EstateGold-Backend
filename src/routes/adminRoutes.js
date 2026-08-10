@@ -19,6 +19,13 @@ router.get(
 );
 
 router.get(
+  "/analytics",
+  auth,
+  admin,
+  controller.getAnalytics
+);
+
+router.get(
   "/properties",
   auth,
   admin,
@@ -51,6 +58,13 @@ router.delete(
   auth,
   admin,
   controller.deleteProperty
+);
+
+router.patch(
+  "/properties/:id/availability-status",
+  auth,
+  admin,
+  controller.updatePropertyAvailabilityStatus
 );
 
 // User Management Routes

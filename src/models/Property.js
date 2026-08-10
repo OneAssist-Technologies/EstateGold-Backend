@@ -178,6 +178,11 @@ floor: {
         ],
       },
 
+      ownerId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+
       createdBy: {
         type:
           mongoose.Schema.Types.ObjectId,
@@ -188,6 +193,12 @@ floor: {
   enum: ["pending", "approved", "rejected"],
   default: "pending",
 },
+
+      availabilityStatus: {
+        type: String,
+        enum: ["on_sale", "hold", "sold"],
+        default: "on_sale",
+      },
 
 reviewedBy: {
   type: mongoose.Schema.Types.ObjectId,
