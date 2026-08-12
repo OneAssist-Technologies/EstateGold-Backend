@@ -1,7 +1,7 @@
 const Property = require("../models/Property");
 const User = require("../models/User");
-const RoleRequest = require("../models/RoleRequest");
 const Location = require("../models/Location");
+const SystemSettings = require("../models/SystemSettings");
 
 exports.getDashboard = async (req, res) => {
   try {
@@ -11,7 +11,7 @@ exports.getDashboard = async (req, res) => {
     const rejected = await Property.countDocuments({ isDeleted: false, status: "rejected" });
     const users = await User.countDocuments();
     const verifiedAgents = await User.countDocuments({ role: "agent", isVerified: true });
-    const pendingRoleRequests = await RoleRequest.countDocuments({ status: "pending" });
+    const pendingRoleRequests = 0;
 
     // Property breakdown by type
     const propertyTypeCounts = await Property.aggregate([
@@ -608,7 +608,7 @@ exports.getAnalytics = async (req, res) => {
     const activeListings = await Property.countDocuments({ isDeleted: false, status: "approved" });
     const totalUsers = await User.countDocuments();
     const totalAgents = await User.countDocuments({ role: "agent" });
-    const pendingRoleReqs = await RoleRequest.countDocuments({ status: "pending" });
+    const pendingRoleReqs = 0;
     const pendingPropReqs = await Property.countDocuments({ isDeleted: false, status: "pending" });
     const pendingRequests = pendingRoleReqs + pendingPropReqs;
 
@@ -629,8 +629,8 @@ exports.getAnalytics = async (req, res) => {
     const agentsInPeriod = await User.countDocuments({ role: "agent", createdAt: { $gte: startDate, $lte: endDate } });
     const agentsInPrev = await User.countDocuments({ role: "agent", createdAt: { $gte: prevStartDate, $lt: prevEndDate } });
 
-    const pendingInPeriod = await RoleRequest.countDocuments({ status: "pending", createdAt: { $gte: startDate, $lte: endDate } });
-    const pendingInPrev = await RoleRequest.countDocuments({ status: "pending", createdAt: { $gte: prevStartDate, $lt: prevEndDate } });
+    const pendingInPeriod = 0;
+    const pendingInPrev = 0;
 
     const calcTrend = (curr, prev) => {
       if (!prev || prev === 0) return { pct: curr > 0 ? "+100.0%" : "0.0%", isUp: true };
@@ -777,11 +777,6 @@ exports.getAnalytics = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(3);
 
-    const recentRoleRequests = await RoleRequest.find()
-      .populate("user", "fullName")
-      .sort({ createdAt: -1 })
-      .limit(3);
-
     const recentActivities = [];
 
     recentProperties.forEach((p) => {
@@ -792,17 +787,6 @@ exports.getAnalytics = async (req, res) => {
         description: `${p.propertyType || "Property"} in ${p.locality || p.city || "Tamil Nadu"}`,
         timestamp: p.createdAt,
         category: "property",
-      });
-    });
-
-    recentRoleRequests.forEach((rr) => {
-      recentActivities.push({
-        id: `role-${rr._id}`,
-        type: rr.status === "approved" ? "agent_approved" : "role_requested",
-        title: rr.status === "approved" ? "Agent approved" : "New role request",
-        description: `${rr.user?.fullName || "User"} requested to become ${rr.requestedRole}`,
-        timestamp: rr.createdAt,
-        category: "user",
       });
     });
 
@@ -863,6 +847,100 @@ exports.getAnalytics = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || "Failed to fetch analytics data",
+    });
+  }
+};
+
+exports.getSystemSettings = async (req, res) => {
+  try {
+    let settings = await SystemSettings.findOne();
+    if (!settings) {
+      settings = await SystemSettings.create({});
+    }
+    res.json({
+      success: true,
+      settings,
+    });
+  } catch (error) {
+    console.error("Get System Settings Error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch system settings",
+    });
+  }
+};
+
+exports.updateSystemSettings = async (req, res) => {
+  try {
+    let settings = await SystemSettings.findOne();
+    if (!settings) {
+      settings = new SystemSettings(req.body);
+    } else {
+      Object.assign(settings, req.body);
+    }
+    await settings.save();
+
+    res.json({
+      success: true,
+      message: "Settings saved successfully",
+      settings,
+    });
+  } catch (error) {
+    console.error("Update System Settings Error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update system settings",
+    });
+  }
+};
+
+exports.getStaffUsers = async (req, res) => {
+  try {
+    const staffUsers = await User.find({ role: { $in: ["admin", "agent", "seller"] } })
+      .select("-password")
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      users: staffUsers,
+    });
+  } catch (error) {
+    console.error("Get Staff Users Error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch staff users",
+    });
+  }
+};
+
+exports.updateUserPermissions = async (req, res) => {
+  try {
+    const { permissions } = req.body;
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    user.permissions = permissions;
+    await user.save();
+
+    const updatedUser = user.toObject();
+    delete updatedUser.password;
+
+    res.json({
+      success: true,
+      message: `Permissions updated for ${user.fullName}`,
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error("Update User Permissions Error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update user permissions",
     });
   }
 };

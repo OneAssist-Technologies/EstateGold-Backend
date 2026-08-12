@@ -31,6 +31,7 @@ module.exports = (
     if (req.user) {
       req.user._id = decoded._id || decoded.id;
       req.user.id = decoded.id || decoded._id;
+      req.user.role = decoded.role || "buyer";
     }
 
     next();

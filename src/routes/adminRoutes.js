@@ -73,4 +73,10 @@ router.patch("/users/:id/verify", auth, admin, controller.toggleUserVerify);
 router.patch("/users/:id/status", auth, admin, controller.toggleUserStatus);
 router.delete("/users/:id", auth, admin, controller.deleteUser);
 
+// Settings & Access Control Routes
+router.get("/settings", auth, admin, controller.getSystemSettings);
+router.put("/settings", auth, admin, controller.updateSystemSettings);
+router.get("/staff-users", auth, admin, controller.getStaffUsers);
+router.put("/users/:id/permissions", auth, admin, controller.updateUserPermissions);
+
 module.exports = router;

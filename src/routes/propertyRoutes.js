@@ -14,6 +14,7 @@ const {
   updateProperty,
   deleteProperty,
   updatePropertyStatus,
+  getPublicSettings,
 } = require("../controllers/propertyController");
 
 const upload=
@@ -27,6 +28,9 @@ const upload=
 
 const router =
   express.Router();
+
+router.get("/settings", getPublicSettings);
+router.get("/api/settings", getPublicSettings);
 
 router.post(
   "/createproperty",
