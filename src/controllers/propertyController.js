@@ -1,5 +1,6 @@
 const Property = require("../models/Property");
 const Location = require("../models/Location");
+const User = require("../models/User");
 const { checkPropertyServiceability } = require("../utils/geoUtils");
 
 const safeNumber = (
@@ -11,6 +12,59 @@ const safeNumber = (
   return Number.isNaN(num)
     ? defaultValue
     : num;
+};
+
+const cleanPropertyDetails = (propertyType, body) => {
+  const commonFields = ["purpose", "propertyType", "ownerName", "ownerPhone", "ownerEmail", "ownerType", "agentRelation", "ownerIdType", "ownerIdNumber", "ownerGovtIdDoc", "ownerAddress", "listingType", "city", "locality", "society", "address", "latitude", "longitude", "serviceableAreaId", "price", "description", "availableFrom", "photos", "neighbourhood", "status", "availabilityStatus", "role", "createdBy", "ownerNegotiable", "ownerReadyToMeet"];
+
+  let allowedTypeFields = [];
+  switch (propertyType) {
+    case "Apartment / Flat":
+      allowedTypeFields = ["bedrooms", "bathrooms", "balconies", "area", "carpetArea", "floor", "totalFloors", "furnishing", "parking"];
+      break;
+    case "Independent House":
+      allowedTypeFields = ["bedrooms", "bathrooms", "area", "plotArea", "totalFloors", "furnishing", "parking", "facing", "propertyAge"];
+      break;
+    case "Villa":
+      allowedTypeFields = ["bedrooms", "bathrooms", "balconies", "area", "plotArea", "totalFloors", "furnishing", "parking", "facing", "propertyAge"];
+      break;
+    case "Plot / Land":
+      allowedTypeFields = ["plotArea", "plotFacing", "roadWidth", "cornerPlot", "boundaryWall", "plotType", "landApproval", "waterAvailability", "electricityAvailability"];
+      break;
+    case "Commercial Space":
+      allowedTypeFields = ["commercialType", "area", "carpetArea", "floor", "totalFloors", "washrooms", "parking", "furnishing", "entranceWidth", "propertyAge", "powerLoad"];
+      break;
+    case "Builder Floor":
+      allowedTypeFields = ["bedrooms", "bathrooms", "balconies", "area", "carpetArea", "floor", "totalFloors", "furnishing", "parking", "facing", "propertyAge"];
+      break;
+    default:
+      break;
+  }
+
+  const allAllowed = [...commonFields, ...allowedTypeFields];
+  const cleaned = {};
+  for (const field of allAllowed) {
+    if (body[field] !== undefined) {
+      if (body[field] === "true") {
+        cleaned[field] = true;
+      } else if (body[field] === "false") {
+        cleaned[field] = false;
+      } else if (body[field] === "") {
+        cleaned[field] = undefined;
+      } else {
+        cleaned[field] = body[field];
+      }
+    }
+  }
+
+  const numericFields = ["bedrooms", "bathrooms", "balconies", "area", "carpetArea", "floor", "totalFloors", "plotArea", "roadWidth", "washrooms", "entranceWidth", "powerLoad", "price"];
+  for (const f of numericFields) {
+    if (cleaned[f] !== undefined && cleaned[f] !== null) {
+      cleaned[f] = safeNumber(cleaned[f]);
+    }
+  }
+
+  return cleaned;
 };
 
 
@@ -27,6 +81,7 @@ exports.getPublicSettings = async (req, res) => {
       platformLogo: settings.platformLogo || "",
       supportEmail: settings.supportEmail || "support@estategold.com",
       supportPhone: settings.supportPhone || "+91 1800-123-4567",
+      supportAddress: settings.supportAddress || "12th Floor, Trade Centre, Mumbai",
       defaultCountry: settings.defaultCountry || "India",
       defaultCurrency: settings.defaultCurrency || "INR (₹)",
       timeZone: settings.timeZone || "Asia/Kolkata",
@@ -80,10 +135,11 @@ exports.createProperty =
 
       // If approval is required by admin settings, status is "pending", otherwise "approved"
       const initialStatus = approvalRequired ? "pending" : "approved";
+      const cleanedData = cleanPropertyDetails(req.body.propertyType, req.body);
 
       const property =
         await Property.create({
-          ...req.body,
+          ...cleanedData,
           ownerId: req.body.ownerId || req.user._id || req.user.id,
           createdBy: req.user._id || req.user.id,
           status: initialStatus,
@@ -91,47 +147,21 @@ exports.createProperty =
           latitude: serviceCheck.latitude,
           longitude: serviceCheck.longitude,
           serviceableAreaId: serviceCheck.matchedLocation._id,
-          bedrooms: safeNumber(
-            req.body.bedrooms
-          ),
-
-          bathrooms: safeNumber(
-            req.body.bathrooms
-          ),
-
-          balconies: safeNumber(
-            req.body.balconies
-          ),
-
-          area: safeNumber(
-            req.body.area
-          ),
-
-          floor: safeNumber(
-            req.body.floor
-          ),
-
-          price: safeNumber(
-            req.body.price
-          ),
-
           amenities:
             req.body.amenities
               ? JSON.parse(
                   req.body.amenities
                 )
               : [],
-
-         photos,
-
-neighbourhood: req.body.neighbourhood
-  ? JSON.parse(req.body.neighbourhood)
-  : {
-      nearbyPlaces: {},
-      landmarks: [],
-      ratings: {},
-      notes: "",
-    },
+          photos,
+          neighbourhood: req.body.neighbourhood
+            ? JSON.parse(req.body.neighbourhood)
+            : {
+                nearbyPlaces: {},
+                landmarks: [],
+                ratings: {},
+                notes: "",
+              },
         });
 
       // Increment listing count for the matched serviceable location
@@ -377,7 +407,7 @@ exports.getProperties = async (req, res) => {
 exports.getPropertyById = async (req, res) => {
   try {
     const property = await Property.findById(req.params.id)
-      .populate("createdBy", "_id fullName role");
+      .populate("createdBy", "_id fullName role phone email agencyName");
 
     if (!property) {
       return res.status(404).json({
@@ -415,6 +445,7 @@ exports.getPropertyById = async (req, res) => {
     });
 
   } catch (error) {
+    console.error("Error in getPropertyById:", error);
     return res.status(500).json({
       success: false,
       message: error.message,
@@ -569,6 +600,18 @@ exports.updateProperty = async (req, res) => {
       });
     }
 
+    // Verify ownership: req.user._id or id should match createdBy or ownerId
+    const ownerIdStr = property.ownerId ? property.ownerId.toString() : "";
+    const createdByStr = property.createdBy ? property.createdBy.toString() : "";
+    const userIdStr = req.user._id ? req.user._id.toString() : (req.user.id ? req.user.id.toString() : "");
+
+    if (ownerIdStr !== userIdStr && createdByStr !== userIdStr && req.user.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to modify this property",
+      });
+    }
+
     let settings = await SystemSettings.findOne();
     const allowEditPublished = settings ? (settings.allowEditingPublished ?? true) : true;
     const allowHold = settings ? (settings.allowPropertyHold ?? true) : true;
@@ -636,7 +679,58 @@ exports.updateProperty = async (req, res) => {
       }
     }
 
-    Object.assign(property, req.body);
+    let photos = property.photos || [];
+    if (req.body.existingPhotos) {
+      try {
+        photos = JSON.parse(req.body.existingPhotos);
+      } catch (err) {
+        if (typeof req.body.existingPhotos === "string") {
+          photos = [req.body.existingPhotos];
+        } else if (Array.isArray(req.body.existingPhotos)) {
+          photos = req.body.existingPhotos;
+        }
+      }
+    } else if (req.body.existingPhotos === "") {
+      photos = [];
+    }
+
+    if (req.files && req.files.length > 0) {
+      const newPhotos = req.files.map((file) => file.filename);
+      photos = [...photos, ...newPhotos];
+    }
+
+    req.body.photos = photos;
+
+    if (req.body.amenities && typeof req.body.amenities === "string") {
+      try {
+        req.body.amenities = JSON.parse(req.body.amenities);
+      } catch (err) {
+        console.error("Failed to parse amenities:", err);
+      }
+    }
+    if (req.body.neighbourhood && typeof req.body.neighbourhood === "string") {
+      try {
+        req.body.neighbourhood = JSON.parse(req.body.neighbourhood);
+      } catch (err) {
+        console.error("Failed to parse neighbourhood:", err);
+      }
+    }
+
+    const cleanedData = cleanPropertyDetails(req.body.propertyType || property.propertyType, req.body);
+
+    const allTypeFields = [
+      "bedrooms", "bathrooms", "balconies", "area", "carpetArea", "floor", "totalFloors", "furnishing", "parking",
+      "plotArea", "facing", "propertyAge", "plotFacing", "roadWidth", "cornerPlot", "boundaryWall", "plotType",
+      "landApproval", "waterAvailability", "electricityAvailability", "commercialType", "washrooms", "entranceWidth", "powerLoad"
+    ];
+
+    for (const field of allTypeFields) {
+      if (cleanedData[field] === undefined) {
+        property[field] = undefined;
+      }
+    }
+
+    Object.assign(property, cleanedData);
 
     await property.save();
 
@@ -645,6 +739,7 @@ exports.updateProperty = async (req, res) => {
       data: property,
     });
   } catch (err) {
+    console.error("Error in updateProperty:", err);
     res.status(500).json({
       success: false,
       message: err.message,
@@ -674,6 +769,53 @@ exports.deleteProperty = async (req, res) => {
     });
   }
 };
+
+exports.requestDelete = async (req, res) => {
+  try {
+    const { reason } = req.body;
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Reason is required to submit a deletion request",
+      });
+    }
+
+    const property = await Property.findById(req.params.id);
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        message: "Property not found",
+      });
+    }
+
+    // Verify ownership: req.user._id should match createdBy or ownerId
+    const ownerIdStr = property.ownerId ? property.ownerId.toString() : "";
+    const createdByStr = property.createdBy ? property.createdBy.toString() : "";
+    const userIdStr = req.user._id.toString();
+
+    if (ownerIdStr !== userIdStr && createdByStr !== userIdStr && req.user.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to request deletion of this property",
+      });
+    }
+
+    property.deleteRequested = true;
+    property.deleteRequestedReason = reason;
+    property.deleteRequestedAt = new Date();
+    await property.save();
+
+    res.json({
+      success: true,
+      message: "Deletion request submitted successfully for admin review",
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
   exports.filterProperties =
   async (req, res) => {
     try {
@@ -686,6 +828,7 @@ exports.deleteProperty = async (req, res) => {
 
       const query = {
         status: "approved",
+        isDeleted: { $ne: true },
       };
 
       if (city)
@@ -760,6 +903,7 @@ exports.updatePropertyStatus = async (
       const properties =
         await Property.find({
           status: "approved",
+          isDeleted: { $ne: true },
 
           $or: [
             {

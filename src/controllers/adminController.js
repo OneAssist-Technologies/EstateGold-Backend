@@ -109,8 +109,11 @@ exports.getProperties = async (req, res) => {
 };
 
     if (req.query.status) {
-      filter.status =
-        req.query.status;
+      if (req.query.status === "delete_requests") {
+        filter.deleteRequested = true;
+      } else {
+        filter.status = req.query.status;
+      }
     }
 
     if (req.query.type) {
@@ -158,7 +161,7 @@ exports.getProperties = async (req, res) => {
       await Property.find(filter)
         .populate(
           "createdBy",
-          "fullName email"
+          "fullName email phone role agencyName"
         )
         .sort({
           createdAt: -1,
@@ -183,6 +186,7 @@ exports.getProperties = async (req, res) => {
     const pendingCount = await Property.countDocuments({ isDeleted: false, status: "pending" });
     const approvedCount = await Property.countDocuments({ isDeleted: false, status: "approved" });
     const rejectedCount = await Property.countDocuments({ isDeleted: false, status: "rejected" });
+    const deleteRequestsCount = await Property.countDocuments({ isDeleted: false, deleteRequested: true });
 
     res.json({
       success: true,
@@ -195,6 +199,7 @@ exports.getProperties = async (req, res) => {
         pending: pendingCount,
         approved: approvedCount,
         rejected: rejectedCount,
+        delete_requests: deleteRequestsCount,
       },
     });
   } catch (error) {
@@ -941,6 +946,77 @@ exports.updateUserPermissions = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || "Failed to update user permissions",
+    });
+  }
+};
+
+exports.rejectDeleteRequest = async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
+
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        message: "Property not found",
+      });
+    }
+
+    property.deleteRequested = false;
+    property.deleteRequestedReason = "";
+    property.deleteRequestedAt = undefined;
+
+    await property.save();
+
+    res.json({
+      success: true,
+      message: "Deletion request rejected successfully",
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.getUnreadCounts = async (req, res) => {
+  try {
+    const { lastVisitedProperties, lastVisitedUsers, lastVisitedLocations } = req.query;
+
+    const parseDate = (d) => {
+      if (!d) return new Date(0);
+      const parsed = new Date(d);
+      return isNaN(parsed.getTime()) ? new Date(0) : parsed;
+    };
+
+    const propDate = parseDate(lastVisitedProperties);
+    const userDate = parseDate(lastVisitedUsers);
+    const locDate = parseDate(lastVisitedLocations);
+
+    const unreadProperties = await Property.countDocuments({
+      isDeleted: false,
+      createdAt: { $gt: propDate }
+    });
+
+    const unreadUsers = await User.countDocuments({
+      createdAt: { $gt: userDate }
+    });
+
+    const unreadLocations = await Location.countDocuments({
+      createdAt: { $gt: locDate }
+    });
+
+    res.json({
+      success: true,
+      unreadProperties,
+      unreadUsers,
+      unreadLocations
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
     });
   }
 };
