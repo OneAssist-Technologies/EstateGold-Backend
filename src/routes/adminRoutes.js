@@ -26,6 +26,13 @@ router.get(
 );
 
 router.get(
+  "/unread-counts",
+  auth,
+  admin,
+  controller.getUnreadCounts
+);
+
+router.get(
   "/properties",
   auth,
   admin,
@@ -58,6 +65,13 @@ router.delete(
   auth,
   admin,
   controller.deleteProperty
+);
+
+router.patch(
+  "/properties/:id/reject-delete-request",
+  auth,
+  admin,
+  controller.rejectDeleteRequest
 );
 
 router.patch(

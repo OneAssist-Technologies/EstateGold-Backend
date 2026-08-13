@@ -15,6 +15,7 @@ const {
   deleteProperty,
   updatePropertyStatus,
   getPublicSettings,
+  requestDelete,
 } = require("../controllers/propertyController");
 
 const upload=
@@ -95,9 +96,20 @@ router.patch(
   rejectProperty
 );
 
-router.put("/properties/:id", updateProperty);
+router.put(
+  "/properties/:id",
+  auth,
+  upload.array("photos", 20),
+  updateProperty
+);
 
 router.delete("/properties/:id", deleteProperty);
+
+router.patch(
+  "/my-properties/:id/request-delete",
+  auth,
+  requestDelete
+);
 
 router.patch(
   "/properties/:id/status",

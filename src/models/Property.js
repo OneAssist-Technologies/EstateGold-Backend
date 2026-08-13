@@ -58,6 +58,24 @@ floor: {
       furnishing: String,
       parking: Boolean,
 
+      carpetArea: Number,
+      totalFloors: Number,
+      plotArea: Number,
+      facing: String,
+      propertyAge: String,
+      plotFacing: String,
+      roadWidth: Number,
+      cornerPlot: Boolean,
+      boundaryWall: Boolean,
+      plotType: String,
+      landApproval: String,
+      waterAvailability: String,
+      electricityAvailability: String,
+      commercialType: String,
+      washrooms: Number,
+      entranceWidth: Number,
+      powerLoad: Number,
+
       amenities: [String],
 
       price: Number,
@@ -207,10 +225,29 @@ reviewedBy: {
 
 reviewedAt: Date,
 
-rejectReason: {
-  type: String,
-  default: "",
-},
+    rejectReason: {
+      type: String,
+      default: "",
+    },
+
+    deleteRequested: {
+      type: Boolean,
+      default: false,
+    },
+    deleteRequestedReason: {
+      type: String,
+      default: "",
+    },
+    deleteRequestedAt: Date,
+
+    ownerNegotiable: {
+      type: Boolean,
+      default: false,
+    },
+    ownerReadyToMeet: {
+      type: Boolean,
+      default: false,
+    },
 
 isDeleted: {
   type: Boolean,

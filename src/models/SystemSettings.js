@@ -23,6 +23,11 @@ const systemSettingsSchema = new mongoose.Schema(
       default: "+91 1800-123-4567",
       trim: true,
     },
+    supportAddress: {
+      type: String,
+      default: "12th Floor, Trade Centre, Mumbai",
+      trim: true,
+    },
     defaultCountry: {
       type: String,
       default: "India",
