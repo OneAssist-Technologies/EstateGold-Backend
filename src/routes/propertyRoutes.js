@@ -34,6 +34,22 @@ router.get("/settings", getPublicSettings);
 router.get("/api/settings", getPublicSettings);
 
 router.post(
+  "/upload-document",
+  auth,
+  upload.single("document"),
+  (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No file uploaded" });
+    }
+    return res.json({
+      success: true,
+      fileUrl: `/uploads/properties/${req.file.filename}`,
+      fileName: req.file.originalname
+    });
+  }
+);
+
+router.post(
   "/createproperty",
   auth,
   upload.array(

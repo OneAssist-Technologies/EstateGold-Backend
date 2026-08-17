@@ -49,9 +49,9 @@ exports.createLocation = async (req, res) => {
         existing.pincodes = Array.isArray(pincodes)
           ? pincodes
           : (pincodes || "")
-              .split(",")
-              .map((p) => p.trim())
-              .filter(Boolean);
+            .split(",")
+            .map((p) => p.trim())
+            .filter(Boolean);
       }
       if (propertyTypes !== undefined) existing.propertyTypes = propertyTypes;
       if (allowedServices !== undefined) existing.allowedServices = allowedServices;
@@ -79,9 +79,9 @@ exports.createLocation = async (req, res) => {
       pincodes: Array.isArray(pincodes)
         ? pincodes
         : (pincodes || "")
-            .split(",")
-            .map((p) => p.trim())
-            .filter(Boolean),
+          .split(",")
+          .map((p) => p.trim())
+          .filter(Boolean),
       propertyTypes: propertyTypes || [],
       allowedServices: allowedServices || [],
       maxListings: Number(maxListings) || 1000,
@@ -179,6 +179,52 @@ exports.getLocations = async (req, res) => {
       .skip(skip)
       .limit(limitNum);
 
+    // Resolve average price for each city from market insight cache or listed properties
+    const LocalityInsightCache = require("../models/LocalityInsightCache");
+    
+    const resolvedLocations = [];
+    for (const loc of locations) {
+      const locObj = loc.toObject();
+      let avgPrice = null;
+
+      if (loc.city) {
+        const cleanCity = loc.city.trim();
+        
+        // 1. Try to compute average from cached localities of this city
+        const cachedLocalities = await LocalityInsightCache.find({
+          city: { $regex: new RegExp(`^${cleanCity}$`, "i") },
+          averageLocalityPrice: { $gt: 0 }
+        });
+        
+        if (cachedLocalities.length > 0) {
+          const sum = cachedLocalities.reduce((s, c) => s + c.averageLocalityPrice, 0);
+          avgPrice = Math.round(sum / cachedLocalities.length);
+        } else {
+          // 2. Try to compute average from properties in our own DB
+          const avgDoc = await Property.aggregate([
+            {
+              $match: {
+                isDeleted: false,
+                city: { $regex: new RegExp(`^${cleanCity}$`, "i") },
+                price: { $gt: 0 }
+              }
+            },
+            {
+              $group: {
+                _id: null,
+                avgPrice: { $avg: "$price" }
+              }
+            }
+          ]);
+          if (avgDoc && avgDoc.length > 0 && avgDoc[0].avgPrice) {
+            avgPrice = Math.round(avgDoc[0].avgPrice);
+          }
+        }
+      }
+      locObj.averagePrice = avgPrice;
+      resolvedLocations.push(locObj);
+    }
+
     const stats = {
       totalCities: allLocations.length,
       activeCities: allLocations.filter((l) => l.status === "active").length,
@@ -190,15 +236,15 @@ exports.getLocations = async (req, res) => {
       averageRadius:
         allLocations.length > 0
           ? Math.round(
-              allLocations.reduce((sum, item) => sum + item.radiusKm, 0) /
-                allLocations.length
-            )
+            allLocations.reduce((sum, item) => sum + item.radiusKm, 0) /
+            allLocations.length
+          )
           : 0,
     };
 
     res.json({
       success: true,
-      locations,
+      locations: resolvedLocations,
       total,
       page: pageNum,
       pages: Math.ceil(total / limitNum) || 1,

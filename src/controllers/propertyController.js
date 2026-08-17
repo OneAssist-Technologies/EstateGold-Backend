@@ -15,27 +15,116 @@ const safeNumber = (
 };
 
 const cleanPropertyDetails = (propertyType, body) => {
-  const commonFields = ["purpose", "propertyType", "ownerName", "ownerPhone", "ownerEmail", "ownerType", "agentRelation", "ownerIdType", "ownerIdNumber", "ownerGovtIdDoc", "ownerAddress", "listingType", "city", "locality", "society", "address", "latitude", "longitude", "serviceableAreaId", "price", "description", "availableFrom", "photos", "neighbourhood", "status", "availabilityStatus", "role", "createdBy", "ownerNegotiable", "ownerReadyToMeet"];
+  const commonFields = [
+    "purpose", "propertyType", "ownerName", "ownerPhone", "ownerEmail", "ownerType", 
+    "agentRelation", "ownerIdType", "ownerIdNumber", "ownerGovtIdDoc", "ownerAddress", 
+    "listingType", "city", "state", "locality", "society", "address", "latitude", 
+    "longitude", "serviceableAreaId", "price", "description", "availableFrom", "photos", 
+    "neighbourhood", "status", "availabilityStatus", "role", "createdBy", "ownerNegotiable", 
+    "ownerReadyToMeet", "marketInsight", "amenities", "facing", "pendingIssues", "documents",
+    "ownershipType", "numberOfOwners", "pan"
+  ];
 
   let allowedTypeFields = [];
   switch (propertyType) {
     case "Apartment / Flat":
-      allowedTypeFields = ["bedrooms", "bathrooms", "balconies", "area", "carpetArea", "floor", "totalFloors", "furnishing", "parking"];
+      allowedTypeFields = [
+        "bedrooms", "bathrooms", "balconies", "area", "carpetArea", "floor", "totalFloors", 
+        "furnishing", "parking", "lift", "powerBackup", "security", "society", "maintenance", 
+        "superArea", "propertyAge", "waterAvailability"
+      ];
       break;
     case "Independent House":
-      allowedTypeFields = ["bedrooms", "bathrooms", "area", "plotArea", "totalFloors", "furnishing", "parking", "facing", "propertyAge"];
+      allowedTypeFields = [
+        "plotArea", "area", "carpetArea", "bedrooms", "bathrooms", "floor", "totalFloors", 
+        "propertyAge", "parking", "length", "width", "roadWidth", "frontage", "cornerPlot", 
+        "boundaryWall", "garden", "terrace", "waterAvailability", "electricityAvailability", 
+        "solar", "furnishing", "compoundWall", "borewell", "electricity"
+      ];
       break;
     case "Villa":
-      allowedTypeFields = ["bedrooms", "bathrooms", "balconies", "area", "plotArea", "totalFloors", "furnishing", "parking", "facing", "propertyAge"];
-      break;
-    case "Plot / Land":
-      allowedTypeFields = ["plotArea", "plotFacing", "roadWidth", "cornerPlot", "boundaryWall", "plotType", "landApproval", "waterAvailability", "electricityAvailability"];
-      break;
-    case "Commercial Space":
-      allowedTypeFields = ["commercialType", "area", "carpetArea", "floor", "totalFloors", "washrooms", "parking", "furnishing", "entranceWidth", "propertyAge", "powerLoad"];
+      allowedTypeFields = [
+        "community", "plotArea", "area", "carpetArea", "bedrooms", "bathrooms", "floor", 
+        "totalFloors", "propertyAge", "parking", "garden", "privatePool", "terrace", 
+        "servantRoom", "furnishing", "maintenance", "solar"
+      ];
       break;
     case "Builder Floor":
-      allowedTypeFields = ["bedrooms", "bathrooms", "balconies", "area", "carpetArea", "floor", "totalFloors", "furnishing", "parking", "facing", "propertyAge"];
+      allowedTypeFields = [
+        "bedrooms", "bathrooms", "balconies", "area", "carpetArea", "floor", "totalFloors", 
+        "propertyAge", "furnishing", "parking", "lift", "powerBackup", "security", "maintenance", 
+        "numberOfUnits"
+      ];
+      break;
+    case "Plot / Land":
+    case "Residential Plot":
+      allowedTypeFields = [
+        "plotArea", "plotFacing", "roadWidth", "cornerPlot", "boundaryWall", "plotType", 
+        "landApproval", "waterAvailability", "electricityAvailability", "length", "width", 
+        "frontage", "layoutName", "gatedLayout", "drainage", "roadAccess", "gps", 
+        "surveyNumber", "subdivisionNumber", "landClassification", "zoning"
+      ];
+      break;
+    case "Agricultural Land":
+      allowedTypeFields = [
+        "plotArea", "surveyNumber", "village", "taluk", "district", "landClassification", 
+        "length", "width", "roadAccess", "roadWidth", "irrigation", "borewell", 
+        "waterAvailability", "electricityAvailability", "fencing", "crops", "soilType", 
+        "farmhouse", "pricePerAcre"
+      ];
+      break;
+    case "Commercial Space":
+    case "Office Space":
+      allowedTypeFields = [
+        "carpetArea", "area", "floor", "totalFloors", "furnishing", "workstations", 
+        "cabins", "meetingRooms", "reception", "pantry", "serverRoom", "washrooms", 
+        "lift", "parking", "powerBackup", "ac", "internet", "security", "fireSafety", 
+        "maintenance", "propertyAge", "powerLoad", "entranceWidth"
+      ];
+      break;
+    case "Shop / Retail":
+      allowedTypeFields = [
+        "carpetArea", "area", "floor", "frontage", "ceilingHeight", "roadWidth", 
+        "mainRoadFacing", "cornerShop", "shutters", "parking", "powerLoad", 
+        "waterAvailability", "washrooms", "signboard", "footfallEstimate", 
+        "suitableBusiness", "maintenance"
+      ];
+      break;
+    case "Warehouse":
+      allowedTypeFields = [
+        "area", "carpetArea", "ceilingHeight", "loadingUnloading", "dock", "truckAccess", 
+        "roadWidth", "storageCapacity", "flooring", "powerLoad", "waterAvailability", 
+        "officeArea", "security", "fireSafety", "parking"
+      ];
+      break;
+    case "Industrial Property":
+      allowedTypeFields = [
+        "industrialType", "area", "carpetArea", "powerLoad", "transformer", 
+        "waterAvailability", "productionArea", "loadingUnloading", "crane", 
+        "truckAccess", "roadWidth", "parking", "workerFacilities", "fireSafety", 
+        "pollutionCompliance", "zoning", "machineryIncluded"
+      ];
+      break;
+    case "Hotel / Resort":
+      allowedTypeFields = [
+        "area", "carpetArea", "numberOfRooms", "roomTypes", "floor", "totalFloors", 
+        "restaurant", "kitchen", "parking", "privatePool", "banquetHall", "gym", 
+        "servantRoom", "powerBackup", "waterAvailability", "occupancy", "revenue"
+      ];
+      break;
+    case "PG / Hostel":
+      allowedTypeFields = [
+        "genderType", "numberOfRooms", "totalBeds", "availableBeds", "roomSharingType", 
+        "rentPerBed", "deposit", "foodIncluded", "electricityAvailability", "internet", 
+        "laundry", "housekeeping", "security", "parking", "ac", "rules", "occupancy"
+      ];
+      break;
+    case "Builder / New Project":
+      allowedTypeFields = [
+        "projectName", "community", "plotArea", "area", "towers", "floor", "totalFloors", 
+        "totalUnits", "availableUnits", "bhkTypes", "carpetArea", "price", "amenities", 
+        "constructionStatus", "possessionDate", "maintenance", "parking", "paymentPlan"
+      ];
       break;
     default:
       break;
@@ -133,6 +222,25 @@ exports.createProperty =
         });
       }
 
+      if (req.body.pendingIssues) {
+        try {
+          if (typeof req.body.pendingIssues === "string") {
+            req.body.pendingIssues = JSON.parse(req.body.pendingIssues);
+          }
+        } catch (err) {
+          console.error("Failed to parse pendingIssues:", err);
+        }
+      }
+      if (req.body.documents) {
+        try {
+          if (typeof req.body.documents === "string") {
+            req.body.documents = JSON.parse(req.body.documents);
+          }
+        } catch (err) {
+          console.error("Failed to parse documents:", err);
+        }
+      }
+
       // If approval is required by admin settings, status is "pending", otherwise "approved"
       const initialStatus = approvalRequired ? "pending" : "approved";
       const cleanedData = cleanPropertyDetails(req.body.propertyType, req.body);
@@ -162,6 +270,9 @@ exports.createProperty =
                 ratings: {},
                 notes: "",
               },
+          marketInsight: req.body.marketInsight
+            ? (typeof req.body.marketInsight === "string" ? JSON.parse(req.body.marketInsight) : req.body.marketInsight)
+            : undefined,
         });
 
       // Increment listing count for the matched serviceable location
@@ -204,6 +315,7 @@ exports.getProperties = async (req, res) => {
       maxPrice,
       sort,
       availabilityStatus,
+      role,
     } = req.query;
 
     const query = {
@@ -299,6 +411,16 @@ exports.getProperties = async (req, res) => {
         if (!isNaN(maxVal)) {
           query.price.$lte = maxVal;
         }
+      }
+    }
+
+    // Role filter (seller/owner vs agent based on property tag listingType)
+    if (role && role.trim() !== "") {
+      const roleStr = role.trim().toLowerCase();
+      if (roleStr === "seller" || roleStr === "owner") {
+        query.listingType = { $ne: "another_owner" };
+      } else if (roleStr === "agent") {
+        query.listingType = "another_owner";
       }
     }
 
@@ -414,6 +536,38 @@ exports.getPropertyById = async (req, res) => {
         success: false,
         message: "Property not found",
       });
+    }
+
+    // Fetch market insight on-demand if it doesn't exist
+    if (
+      (!property.marketInsight || property.marketInsight.success === undefined || property.marketInsight.retrievedAt === undefined) &&
+      property.city && property.city.trim() &&
+      property.locality && property.locality.trim() &&
+      property.propertyType && property.propertyType.trim()
+    ) {
+      try {
+        console.log(`On-demand fetching market insights for property ${property._id}...`);
+        const marketInsightService = require("../services/marketInsightService");
+        
+        const bedrooms = property.bedrooms || null;
+        const area = property.area || property.carpetArea || property.plotArea || null;
+        
+        const freshInsight = await marketInsightService.getNormalizedMarketInsight({
+          city: property.city,
+          locality: property.locality,
+          propertyType: property.propertyType,
+          bedrooms,
+          area,
+        });
+        
+        if (freshInsight) {
+          property.marketInsight = freshInsight;
+          await property.save();
+          console.log(`Successfully saved marketInsight snapshot on property ${property._id}`);
+        }
+      } catch (err) {
+        console.error(`Failed to fetch on-demand market insights for property ${property._id}:`, err.message);
+      }
     }
 
     const baseUrl = `${req.protocol}://${req.get("host")}`;
@@ -715,13 +869,51 @@ exports.updateProperty = async (req, res) => {
         console.error("Failed to parse neighbourhood:", err);
       }
     }
+    if (req.body.marketInsight) {
+      try {
+        if (typeof req.body.marketInsight === "string") {
+          req.body.marketInsight = JSON.parse(req.body.marketInsight);
+        }
+      } catch (err) {
+        console.error("Failed to parse marketInsight:", err);
+      }
+    }
+    if (req.body.pendingIssues) {
+      try {
+        if (typeof req.body.pendingIssues === "string") {
+          req.body.pendingIssues = JSON.parse(req.body.pendingIssues);
+        }
+      } catch (err) {
+        console.error("Failed to parse pendingIssues:", err);
+      }
+    }
+    if (req.body.documents) {
+      try {
+        if (typeof req.body.documents === "string") {
+          req.body.documents = JSON.parse(req.body.documents);
+        }
+      } catch (err) {
+        console.error("Failed to parse documents:", err);
+      }
+    }
 
     const cleanedData = cleanPropertyDetails(req.body.propertyType || property.propertyType, req.body);
 
     const allTypeFields = [
       "bedrooms", "bathrooms", "balconies", "area", "carpetArea", "floor", "totalFloors", "furnishing", "parking",
       "plotArea", "facing", "propertyAge", "plotFacing", "roadWidth", "cornerPlot", "boundaryWall", "plotType",
-      "landApproval", "waterAvailability", "electricityAvailability", "commercialType", "washrooms", "entranceWidth", "powerLoad"
+      "landApproval", "waterAvailability", "electricityAvailability", "commercialType", "washrooms", "entranceWidth", "powerLoad",
+      "length", "width", "superArea", "lift", "powerBackup", "security", "society", "maintenance", "frontage", "compoundWall",
+      "garden", "terrace", "borewell", "electricity", "solar", "community", "privatePool", "servantRoom", "gatedLayout",
+      "drainage", "roadAccess", "gps", "surveyNumber", "subdivisionNumber", "landClassification", "zoning", "taluk",
+      "irrigation", "crops", "soilType", "farmhouse", "pricePerAcre", "workstations", "cabins", "meetingRooms", "reception",
+      "pantry", "serverRoom", "ac", "internet", "fireSafety", "ceilingHeight", "mainRoadFacing", "cornerShop", "shutters",
+      "signboard", "footfallEstimate", "suitableBusiness", "loadingUnloading", "dock", "truckAccess", "storageCapacity",
+      "flooring", "officeArea", "industrialType", "transformer", "productionArea", "crane", "workerFacilities",
+      "pollutionCompliance", "machineryIncluded", "numberOfRooms", "roomTypes", "restaurant", "kitchen", "banquetHall",
+      "gym", "occupancy", "revenue", "genderType", "totalBeds", "availableBeds", "roomSharingType", "rentPerBed", "deposit",
+      "foodIncluded", "laundry", "housekeeping", "rules", "projectName", "towers", "totalUnits", "availableUnits", "bhkTypes",
+      "constructionStatus", "possessionDate", "paymentPlan"
     ];
 
     for (const field of allTypeFields) {
