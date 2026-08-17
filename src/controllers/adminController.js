@@ -105,8 +105,8 @@ exports.getProperties = async (req, res) => {
       (page - 1) * limit;
 
     const filter = {
-  isDeleted: false,
-};
+      isDeleted: false,
+    };
 
     if (req.query.status) {
       if (req.query.status === "delete_requests") {
@@ -215,7 +215,7 @@ exports.getProperties = async (req, res) => {
 exports.getProperty = async (req, res) => {
   try {
 
-  
+
     const property = await Property.findById(
       req.params.id
     ).populate(

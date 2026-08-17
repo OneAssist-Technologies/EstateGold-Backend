@@ -11,6 +11,7 @@ const authRoutes = require("./src/routes/authRoutes");
 const propertyRoutes = require("./src/routes/propertyRoutes");
 const adminRoutes = require("./src/routes/adminRoutes");
 const locationRoutes = require("./src/routes/locationRoutes");
+const marketInsightRoutes = require("./src/routes/marketInsightRoutes");
 
 const app = express();
 
@@ -43,6 +44,7 @@ app.use("/admin", adminRoutes);
 app.use(authRoutes);
 app.use(propertyRoutes);
 app.use("/api/locations", locationRoutes);
+app.use("/market-insight", marketInsightRoutes);
 
 // Health Check
 app.get("/", (req, res) => {
