@@ -31,6 +31,7 @@ const normalizeLocalityInsight = (raw, locality, city) => {
     city: raw.city || city,
     supported: true,
     message: raw.message || "",
+    handoffUrl: raw.handoffUrl || "",
     marketData: {
       averagePrice: insights.avgPriceInr || null,
       supply: insights.supplyCount || 0,
