@@ -77,6 +77,12 @@ function isTypeAllowed(allowedTypes, targetType) {
     )
       return true;
 
+    if (
+      (target.includes("builder") || target.includes("project")) &&
+      (allowed.includes("apartment") || allowed.includes("villa") || allowed.includes("house") || allowed.includes("project") || allowed.includes("builder"))
+    )
+      return true;
+
     return false;
   });
 }

@@ -179,7 +179,7 @@ exports.getLocations = async (req, res) => {
       .skip(skip)
       .limit(limitNum);
 
-    // Resolve average price for each city from market insight cache or listed properties
+    // Resolve average price per sqft for each city from market insight cache (AVnester search_properties data)
     const LocalityInsightCache = require("../models/LocalityInsightCache");
     
     const resolvedLocations = [];
@@ -190,34 +190,73 @@ exports.getLocations = async (req, res) => {
       if (loc.city) {
         const cleanCity = loc.city.trim();
         
-        // 1. Try to compute average from cached localities of this city
+        // Compute average price per sqft from cached localities of this city using estimatedPricePerSqft
         const cachedLocalities = await LocalityInsightCache.find({
           city: { $regex: new RegExp(`^${cleanCity}$`, "i") },
-          averageLocalityPrice: { $gt: 0 }
+          estimatedPricePerSqft: { $gt: 0 }
         });
         
         if (cachedLocalities.length > 0) {
-          const sum = cachedLocalities.reduce((s, c) => s + c.averageLocalityPrice, 0);
+          const sum = cachedLocalities.reduce((s, c) => s + c.estimatedPricePerSqft, 0);
           avgPrice = Math.round(sum / cachedLocalities.length);
         } else {
-          // 2. Try to compute average from properties in our own DB
-          const avgDoc = await Property.aggregate([
-            {
-              $match: {
-                isDeleted: false,
-                city: { $regex: new RegExp(`^${cleanCity}$`, "i") },
-                price: { $gt: 0 }
-              }
-            },
-            {
-              $group: {
-                _id: null,
-                avgPrice: { $avg: "$price" }
-              }
+          // Dynamic fetch: if no cached locality pricing is found, trigger a fallback fetch for this city name using a primary locality
+          try {
+            const marketInsightService = require("../services/marketInsightService");
+            
+            let fallbackLocality = cleanCity;
+            const lowerCity = cleanCity.toLowerCase();
+            if (lowerCity === "chennai") {
+              fallbackLocality = "Anna Nagar";
+            } else if (lowerCity.includes("coimbatore south")) {
+              fallbackLocality = "Peelamedu";
+            } else if (lowerCity.includes("coimbatore north")) {
+              fallbackLocality = "Gandhipuram";
+            } else if (lowerCity.includes("avinashi")) {
+              fallbackLocality = "Avinashi";
             }
-          ]);
-          if (avgDoc && avgDoc.length > 0 && avgDoc[0].avgPrice) {
-            avgPrice = Math.round(avgDoc[0].avgPrice);
+
+            console.log(`Triggering dynamic fallback fetch for ${cleanCity} using locality ${fallbackLocality}...`);
+            const freshInsight = await marketInsightService.getNormalizedMarketInsight({
+              city: cleanCity,
+              locality: fallbackLocality,
+              propertyType: "Apartment / Flat",
+            });
+            if (freshInsight && freshInsight.estimatedPricePerSqft) {
+              avgPrice = freshInsight.estimatedPricePerSqft;
+              
+              // Cache it so it's resolved for future requests
+              await LocalityInsightCache.findOneAndUpdate(
+                {
+                  country: "India",
+                  state: loc.state || "",
+                  city: cleanCity,
+                  locality: fallbackLocality,
+                  propertyType: "Apartment / Flat",
+                  bedrooms: null,
+                },
+                {
+                  country: "India",
+                  state: loc.state || "",
+                  city: cleanCity,
+                  locality: fallbackLocality,
+                  propertyType: "Apartment / Flat",
+                  bedrooms: null,
+                  supported: freshInsight.supported,
+                  message: freshInsight.message,
+                  averageLocalityPrice: freshInsight.averageLocalityPrice,
+                  estimatedPricePerSqft: freshInsight.estimatedPricePerSqft,
+                  comparableCount: freshInsight.comparableCount,
+                  estimatedPropertyValue: freshInsight.estimatedPropertyValue,
+                  confidence: freshInsight.confidence,
+                  marketData: freshInsight.marketData,
+                  retrievedAt: freshInsight.retrievedAt,
+                },
+                { upsert: true, new: true }
+              );
+            }
+          } catch (err) {
+            console.error(`Dynamic location price resolution failed for ${cleanCity}:`, err.message);
           }
         }
       }

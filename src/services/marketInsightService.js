@@ -51,7 +51,7 @@ const getNormalizedMarketInsight = async ({
     cleanCity = "Tiruppur";
   } else if (lowerCity === "trichy" || lowerCity === "tiruchirapalli" || lowerCity === "tiruchirappalli") {
     cleanCity = "Tiruchirappalli";
-  } else if (lowerCity === "coimbatore" || lowerCity === "covai" || lowerCity === "kovai") {
+  } else if (lowerCity.includes("coimbatore") || lowerCity === "covai" || lowerCity === "kovai" || lowerCity.includes("avinashi")) {
     cleanCity = "Coimbatore";
   } else if (lowerCity === "chennai" || lowerCity === "madras") {
     cleanCity = "Chennai";
@@ -79,7 +79,7 @@ const getNormalizedMarketInsight = async ({
       locality: cleanLocality,
       city: cleanCity,
       supported: false,
-      message: insightsResult?.message || "Market insight unavailable for this location.",
+      message: "AVnester market data unavailable for this locality.",
       averageLocalityPrice: null,
       estimatedPricePerSqft: null,
       comparableCount: 0,
@@ -97,63 +97,8 @@ const getNormalizedMarketInsight = async ({
     };
   }
 
-  const averageLocalityPriceRaw = insightsResult.marketData?.averagePrice || null;
-  let averageLocalityPrice = averageLocalityPriceRaw;
+  const averageLocalityPrice = insightsResult.marketData?.averagePrice || null;
 
-  // Fallback: If locality-level averagePrice is null and cleanLocality is not the same as cleanCity,
-  // fetch city-level average insights as a backup!
-  if (averageLocalityPrice === null && cleanLocality && cleanCity && cleanLocality.toLowerCase() !== cleanCity.toLowerCase()) {
-    try {
-      console.log(`Locality average price is null for ${cleanLocality}. Fetching city-level average for ${cleanCity} as fallback...`);
-      const cityInsights = await avnesterService.getLocalityInsights(cleanCity, cleanCity);
-      if (cityInsights && cityInsights.supported && cityInsights.marketData?.averagePrice) {
-        averageLocalityPrice = cityInsights.marketData.averagePrice;
-        console.log(`Found city-level fallback average price: ${averageLocalityPrice}`);
-      }
-    } catch (err) {
-      console.error(`Failed to fetch fallback city-level average for ${cleanCity}:`, err.message);
-    }
-  }
-
-  // Robust Fallback: If averageLocalityPrice is still null, compute from cached localities or database properties of this city
-  if (averageLocalityPrice === null && cleanCity) {
-    try {
-      const LocalityInsightCache = require("../models/LocalityInsightCache");
-      const cachedLocalities = await LocalityInsightCache.find({
-        city: { $regex: new RegExp(`^${cleanCity.trim()}$`, "i") },
-        averageLocalityPrice: { $gt: 0 }
-      });
-      
-      if (cachedLocalities.length > 0) {
-        const sum = cachedLocalities.reduce((s, c) => s + c.averageLocalityPrice, 0);
-        averageLocalityPrice = Math.round(sum / cachedLocalities.length);
-        console.log(`Resolved average price from cached localities for ${cleanCity}: ${averageLocalityPrice}`);
-      } else {
-        const Property = require("../models/Property");
-        const avgDoc = await Property.aggregate([
-          {
-            $match: {
-              isDeleted: false,
-              city: { $regex: new RegExp(`^${cleanCity.trim()}$`, "i") },
-              price: { $gt: 0 }
-            }
-          },
-          {
-            $group: {
-              _id: null,
-              avgPrice: { $avg: "$price" }
-            }
-          }
-        ]);
-        if (avgDoc && avgDoc.length > 0 && avgDoc[0].avgPrice) {
-          averageLocalityPrice = Math.round(avgDoc[0].avgPrice);
-          console.log(`Resolved average price from own database properties for ${cleanCity}: ${averageLocalityPrice}`);
-        }
-      }
-    } catch (err) {
-      console.error(`Failed to resolve robust fallback price for ${cleanCity}:`, err.message);
-    }
-  }
 
   // 2. Fetch search properties comparables
   let estimatedPricePerSqft = null;
@@ -188,10 +133,42 @@ const getNormalizedMarketInsight = async ({
       );
     }
 
+    // Fallback 2: If still no valid listings found, query without propertyType
+    if (validListings.length === 0) {
+      searchResult = await avnesterService.searchProperties(
+        cleanCity,
+        cleanLocality,
+        null,
+        null,
+        20
+      );
+      validListings = (searchResult?.listings || []).filter(
+        (l) => l.price > 0 && l.carpetAreaSqft > 0
+      );
+    }
+
     if (validListings.length > 0) {
       const pricePerSqftArray = validListings.map((l) => Math.round(l.price / l.carpetAreaSqft));
       estimatedPricePerSqft = getMedian(pricePerSqftArray);
       comparableCount = validListings.length;
+    }
+  }
+
+  // Webpage scrape fallback: If estimatedPricePerSqft is still null, fetch from the webpage!
+  if (estimatedPricePerSqft === null && insightsResult.handoffUrl) {
+    try {
+      console.log(`Bypassing search properties to fetch webpage price from: ${insightsResult.handoffUrl}`);
+      const response = await fetch(insightsResult.handoffUrl);
+      if (response.ok) {
+        const html = await response.text();
+        const match = html.match(/"Average Price per Sqft\s*\(INR\)","value":\s*(\d+)/i);
+        if (match && match[1]) {
+          estimatedPricePerSqft = parseInt(match[1], 10);
+          console.log(`Scraped price per sqft for ${cleanLocality} from webpage: ${estimatedPricePerSqft}`);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to scrape webpage price:", err.message);
     }
   }
 
@@ -211,16 +188,20 @@ const getNormalizedMarketInsight = async ({
 
   // 5. Handle supported with null data message
   let message = "";
+  let success = true;
+  let supported = true;
   if (averageLocalityPrice === null && estimatedPricePerSqft === null) {
-    message = "Locality supported, but current price data is unavailable.";
+    message = "AVnester market data unavailable for this locality.";
+    success = false;
+    supported = false;
   }
 
   return {
-    success: true,
+    success,
     source: "AVnester",
     locality: cleanLocality,
     city: cleanCity,
-    supported: true,
+    supported,
     message,
     averageLocalityPrice,
     estimatedPricePerSqft,
