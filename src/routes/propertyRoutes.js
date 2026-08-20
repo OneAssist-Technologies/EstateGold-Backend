@@ -1,8 +1,11 @@
 const express = require("express");
+const path = require("path");
+const fs = require("fs");
 
 const {
   createProperty,
   getProperties,
+  getPropertiesCompare,
   getPropertyById,
   getSimilarProperties,
   getMyProperties,
@@ -16,6 +19,10 @@ const {
   updatePropertyStatus,
   getPublicSettings,
   requestDelete,
+  createPropertyDraft,
+  updatePropertyDraft,
+  getPropertyDraft,
+  deletePropertyDraft,
 } = require("../controllers/propertyController");
 
 const upload=
@@ -49,6 +56,18 @@ router.post(
   }
 );
 
+router.get("/view-file/:filename", (req, res) => {
+  const filename = req.params.filename;
+  const filePath = path.join(__dirname, "../../uploads/properties", filename);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send("File not found");
+  }
+
+  res.setHeader("Content-Disposition", "inline");
+  return res.sendFile(filePath);
+});
+
 router.post(
   "/createproperty",
   auth,
@@ -62,6 +81,37 @@ router.post(
 router.get(
   "/properties",
   getProperties
+);
+
+router.get(
+  "/properties/compare",
+  getPropertiesCompare
+);
+
+router.post(
+  "/properties/draft",
+  auth,
+  upload.array("photos", 20),
+  createPropertyDraft
+);
+
+router.put(
+  "/properties/draft/:id",
+  auth,
+  upload.array("photos", 20),
+  updatePropertyDraft
+);
+
+router.get(
+  "/properties/draft/:id",
+  auth,
+  getPropertyDraft
+);
+
+router.delete(
+  "/properties/draft/:id",
+  auth,
+  deletePropertyDraft
 );
 
 router.get(
