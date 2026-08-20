@@ -240,6 +240,22 @@ exports.getProperty = async (req, res) => {
       return `${baseUrl}/uploads/properties/${clean}`;
     });
 
+    p.documents = (p.documents || []).map((doc) => {
+      if (doc.fileUrl) {
+        if (doc.fileUrl.startsWith("http://") || doc.fileUrl.startsWith("https://")) {
+          if (doc.fileUrl.includes("/uploads/properties/")) {
+            doc.fileUrl = doc.fileUrl.replace("/uploads/properties/", "/view-file/");
+          }
+        } else {
+          const clean = doc.fileUrl.replace(/^\/+/, "").replace(/^uploads\/properties\//, "").replace(/^uploads\//, "");
+          doc.fileUrl = `${baseUrl}/view-file/${clean}`;
+        }
+      }
+      return doc;
+    });
+
+    p.uploadedDocumentTypes = (p.documents || []).map(doc => doc.documentType);
+
     res.json({
       success: true,
       property: p,

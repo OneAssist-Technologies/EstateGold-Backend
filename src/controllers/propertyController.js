@@ -2,6 +2,99 @@ const Property = require("../models/Property");
 const Location = require("../models/Location");
 const User = require("../models/User");
 const { checkPropertyServiceability } = require("../utils/geoUtils");
+const jwt = require("jsonwebtoken");
+
+const getOptionalUser = (req) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.split(" ")[1];
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      if (decoded) {
+        return {
+          _id: decoded._id || decoded.id,
+          id: decoded.id || decoded._id,
+          role: decoded.role || "buyer"
+        };
+      }
+    }
+  } catch (err) {
+    // Ignore error
+  }
+  return null;
+};
+
+const formatDocUrl = (url, baseUrl) => {
+  if (!url) return "";
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    if (url.includes("/uploads/properties/")) {
+      return url.replace("/uploads/properties/", "/view-file/");
+    }
+    return url;
+  }
+  const clean = url.replace(/^\/+/, "").replace(/^uploads\/properties\//, "").replace(/^uploads\//, "");
+  return `${baseUrl}/view-file/${clean}`;
+};
+
+const sanitizePropertyData = (propertyObj, req) => {
+  const baseUrl = `${req.protocol}://${req.get("host")}`;
+  const user = getOptionalUser(req);
+  
+  // Format photos
+  const photos = (propertyObj.photos || []).map((photo) => {
+    if (!photo) return "";
+    if (photo.startsWith("http://") || photo.startsWith("https://")) return photo;
+    const clean = photo.replace(/^\/+/, "").replace(/^uploads\/properties\//, "").replace(/^uploads\//, "");
+    return `${baseUrl}/uploads/properties/${clean}`;
+  });
+
+  const hasDocs = propertyObj.documents && propertyObj.documents.length > 0;
+  
+  // Check authorization
+  let isAuthorized = false;
+  if (user) {
+    if (user.role === "admin") {
+      isAuthorized = true;
+    } else {
+      const ownerId = propertyObj.ownerId
+        ? (propertyObj.ownerId._id || propertyObj.ownerId).toString()
+        : propertyObj.createdBy
+          ? (propertyObj.createdBy._id || propertyObj.createdBy).toString()
+          : "";
+      
+      const createdBy = propertyObj.createdBy
+        ? (propertyObj.createdBy._id || propertyObj.createdBy).toString()
+        : "";
+        
+      const currentUserId = user._id ? user._id.toString() : "";
+      
+      if (currentUserId && (currentUserId === ownerId || currentUserId === createdBy)) {
+        isAuthorized = true;
+      }
+    }
+  }
+
+  const result = {
+    ...propertyObj,
+    photos,
+    documentsAvailable: hasDocs,
+    uploadedDocumentTypes: (propertyObj.documents || []).map(doc => doc.documentType)
+  };
+
+  if (isAuthorized) {
+    result.documents = (propertyObj.documents || []).map((doc) => {
+      const docObj = doc.toObject ? doc.toObject() : { ...doc };
+      if (docObj.fileUrl) {
+        docObj.fileUrl = formatDocUrl(docObj.fileUrl, baseUrl);
+      }
+      return docObj;
+    });
+  } else {
+    delete result.documents;
+  }
+
+  return result;
+};
 
 const safeNumber = (
   value,
@@ -16,11 +109,11 @@ const safeNumber = (
 
 const cleanPropertyDetails = (propertyType, body) => {
   const commonFields = [
-    "purpose", "propertyType", "ownerName", "ownerPhone", "ownerEmail", "ownerType", 
-    "agentRelation", "ownerIdType", "ownerIdNumber", "ownerGovtIdDoc", "ownerAddress", 
-    "listingType", "city", "state", "locality", "society", "address", "latitude", 
-    "longitude", "serviceableAreaId", "price", "description", "availableFrom", "photos", 
-    "neighbourhood", "status", "availabilityStatus", "role", "createdBy", "ownerNegotiable", 
+    "purpose", "propertyType", "ownerName", "ownerPhone", "ownerEmail", "ownerType",
+    "agentRelation", "ownerIdType", "ownerIdNumber", "ownerGovtIdDoc", "ownerAddress",
+    "listingType", "city", "state", "locality", "society", "address", "latitude",
+    "longitude", "serviceableAreaId", "price", "description", "availableFrom", "photos",
+    "neighbourhood", "status", "availabilityStatus", "role", "createdBy", "ownerNegotiable",
     "ownerReadyToMeet", "marketInsight", "amenities", "facing", "pendingIssues", "documents",
     "ownershipType", "numberOfOwners", "pan"
   ];
@@ -29,100 +122,100 @@ const cleanPropertyDetails = (propertyType, body) => {
   switch (propertyType) {
     case "Apartment / Flat":
       allowedTypeFields = [
-        "bedrooms", "bathrooms", "balconies", "area", "carpetArea", "floor", "totalFloors", 
-        "furnishing", "parking", "lift", "powerBackup", "security", "society", "maintenance", 
+        "bedrooms", "bathrooms", "balconies", "area", "carpetArea", "floor", "totalFloors",
+        "furnishing", "parking", "lift", "powerBackup", "security", "society", "maintenance",
         "superArea", "propertyAge", "waterAvailability"
       ];
       break;
     case "Independent House":
       allowedTypeFields = [
-        "plotArea", "area", "carpetArea", "bedrooms", "bathrooms", "floor", "totalFloors", 
-        "propertyAge", "parking", "length", "width", "roadWidth", "frontage", "cornerPlot", 
-        "boundaryWall", "garden", "terrace", "waterAvailability", "electricityAvailability", 
+        "plotArea", "area", "carpetArea", "bedrooms", "bathrooms", "floor", "totalFloors",
+        "propertyAge", "parking", "length", "width", "roadWidth", "frontage", "cornerPlot",
+        "boundaryWall", "garden", "terrace", "waterAvailability", "electricityAvailability",
         "solar", "furnishing", "compoundWall", "borewell", "electricity"
       ];
       break;
     case "Villa":
       allowedTypeFields = [
-        "community", "plotArea", "area", "carpetArea", "bedrooms", "bathrooms", "floor", 
-        "totalFloors", "propertyAge", "parking", "garden", "privatePool", "terrace", 
+        "community", "plotArea", "area", "carpetArea", "bedrooms", "bathrooms", "floor",
+        "totalFloors", "propertyAge", "parking", "garden", "privatePool", "terrace",
         "servantRoom", "furnishing", "maintenance", "solar"
       ];
       break;
     case "Builder Floor":
       allowedTypeFields = [
-        "bedrooms", "bathrooms", "balconies", "area", "carpetArea", "floor", "totalFloors", 
-        "propertyAge", "furnishing", "parking", "lift", "powerBackup", "security", "maintenance", 
+        "bedrooms", "bathrooms", "balconies", "area", "carpetArea", "floor", "totalFloors",
+        "propertyAge", "furnishing", "parking", "lift", "powerBackup", "security", "maintenance",
         "numberOfUnits"
       ];
       break;
     case "Plot / Land":
     case "Residential Plot":
       allowedTypeFields = [
-        "plotArea", "plotFacing", "roadWidth", "cornerPlot", "boundaryWall", "plotType", 
-        "landApproval", "waterAvailability", "electricityAvailability", "length", "width", 
-        "frontage", "layoutName", "gatedLayout", "drainage", "roadAccess", "gps", 
+        "plotArea", "plotFacing", "roadWidth", "cornerPlot", "boundaryWall", "plotType",
+        "landApproval", "waterAvailability", "electricityAvailability", "length", "width",
+        "frontage", "layoutName", "gatedLayout", "drainage", "roadAccess", "gps",
         "surveyNumber", "subdivisionNumber", "landClassification", "zoning"
       ];
       break;
     case "Agricultural Land":
       allowedTypeFields = [
-        "plotArea", "surveyNumber", "village", "taluk", "district", "landClassification", 
-        "length", "width", "roadAccess", "roadWidth", "irrigation", "borewell", 
-        "waterAvailability", "electricityAvailability", "fencing", "crops", "soilType", 
+        "plotArea", "surveyNumber", "village", "taluk", "district", "landClassification",
+        "length", "width", "roadAccess", "roadWidth", "irrigation", "borewell",
+        "waterAvailability", "electricityAvailability", "fencing", "crops", "soilType",
         "farmhouse", "pricePerAcre"
       ];
       break;
     case "Commercial Space":
     case "Office Space":
       allowedTypeFields = [
-        "carpetArea", "area", "floor", "totalFloors", "furnishing", "workstations", 
-        "cabins", "meetingRooms", "reception", "pantry", "serverRoom", "washrooms", 
-        "lift", "parking", "powerBackup", "ac", "internet", "security", "fireSafety", 
+        "carpetArea", "area", "floor", "totalFloors", "furnishing", "workstations",
+        "cabins", "meetingRooms", "reception", "pantry", "serverRoom", "washrooms",
+        "lift", "parking", "powerBackup", "ac", "internet", "security", "fireSafety",
         "maintenance", "propertyAge", "powerLoad", "entranceWidth"
       ];
       break;
     case "Shop / Retail":
       allowedTypeFields = [
-        "carpetArea", "area", "floor", "frontage", "ceilingHeight", "roadWidth", 
-        "mainRoadFacing", "cornerShop", "shutters", "parking", "powerLoad", 
-        "waterAvailability", "washrooms", "signboard", "footfallEstimate", 
+        "carpetArea", "area", "floor", "frontage", "ceilingHeight", "roadWidth",
+        "mainRoadFacing", "cornerShop", "shutters", "parking", "powerLoad",
+        "waterAvailability", "washrooms", "signboard", "footfallEstimate",
         "suitableBusiness", "maintenance"
       ];
       break;
     case "Warehouse":
       allowedTypeFields = [
-        "area", "carpetArea", "ceilingHeight", "loadingUnloading", "dock", "truckAccess", 
-        "roadWidth", "storageCapacity", "flooring", "powerLoad", "waterAvailability", 
+        "area", "carpetArea", "ceilingHeight", "loadingUnloading", "dock", "truckAccess",
+        "roadWidth", "storageCapacity", "flooring", "powerLoad", "waterAvailability",
         "officeArea", "security", "fireSafety", "parking"
       ];
       break;
     case "Industrial Property":
       allowedTypeFields = [
-        "industrialType", "area", "carpetArea", "powerLoad", "transformer", 
-        "waterAvailability", "productionArea", "loadingUnloading", "crane", 
-        "truckAccess", "roadWidth", "parking", "workerFacilities", "fireSafety", 
+        "industrialType", "area", "carpetArea", "powerLoad", "transformer",
+        "waterAvailability", "productionArea", "loadingUnloading", "crane",
+        "truckAccess", "roadWidth", "parking", "workerFacilities", "fireSafety",
         "pollutionCompliance", "zoning", "machineryIncluded"
       ];
       break;
     case "Hotel / Resort":
       allowedTypeFields = [
-        "area", "carpetArea", "numberOfRooms", "roomTypes", "floor", "totalFloors", 
-        "restaurant", "kitchen", "parking", "privatePool", "banquetHall", "gym", 
+        "area", "carpetArea", "numberOfRooms", "roomTypes", "floor", "totalFloors",
+        "restaurant", "kitchen", "parking", "privatePool", "banquetHall", "gym",
         "servantRoom", "powerBackup", "waterAvailability", "occupancy", "revenue"
       ];
       break;
     case "PG / Hostel":
       allowedTypeFields = [
-        "genderType", "numberOfRooms", "totalBeds", "availableBeds", "roomSharingType", 
-        "rentPerBed", "deposit", "foodIncluded", "electricityAvailability", "internet", 
+        "genderType", "numberOfRooms", "totalBeds", "availableBeds", "roomSharingType",
+        "rentPerBed", "deposit", "foodIncluded", "electricityAvailability", "internet",
         "laundry", "housekeeping", "security", "parking", "ac", "rules", "occupancy"
       ];
       break;
     case "Builder / New Project":
       allowedTypeFields = [
-        "projectName", "community", "plotArea", "area", "towers", "floor", "totalFloors", 
-        "totalUnits", "availableUnits", "bhkTypes", "carpetArea", "price", "amenities", 
+        "projectName", "community", "plotArea", "area", "towers", "floor", "totalFloors",
+        "totalUnits", "availableUnits", "bhkTypes", "carpetArea", "price", "amenities",
         "constructionStatus", "possessionDate", "maintenance", "parking", "paymentPlan"
       ];
       break;
@@ -258,18 +351,18 @@ exports.createProperty =
           amenities:
             req.body.amenities
               ? JSON.parse(
-                  req.body.amenities
-                )
+                req.body.amenities
+              )
               : [],
           photos,
           neighbourhood: req.body.neighbourhood
             ? JSON.parse(req.body.neighbourhood)
             : {
-                nearbyPlaces: {},
-                landmarks: [],
-                ratings: {},
-                notes: "",
-              },
+              nearbyPlaces: {},
+              landmarks: [],
+              ratings: {},
+              notes: "",
+            },
           marketInsight: req.body.marketInsight
             ? (typeof req.body.marketInsight === "string" ? JSON.parse(req.body.marketInsight) : req.body.marketInsight)
             : undefined,
@@ -467,24 +560,13 @@ exports.getProperties = async (req, res) => {
         .skip(skip)
         .limit(limit);
 
+    const properties = docs.map((property) => sanitizePropertyData(property.toObject(), req));
+
     const baseUrl = `${req.protocol}://${req.get(
       "host"
     )}`;
 
-    const properties =
-      docs.map((property) => ({
-        ...property.toObject(),
 
-        photos:
-          (property.photos || []).map(
-            (photo) => {
-              if (!photo) return "";
-              if (photo.startsWith("http://") || photo.startsWith("https://")) return photo;
-              const clean = photo.replace(/^\/+/, "").replace(/^uploads\/properties\//, "").replace(/^uploads\//, "");
-              return `${baseUrl}/uploads/properties/${clean}`;
-            }
-          ),
-      }));
 
     res.status(200).json({
       success: true,
@@ -501,14 +583,14 @@ exports.getProperties = async (req, res) => {
         totalPages:
           Math.ceil(
             totalProperties /
-              limit
+            limit
           ),
 
         hasNext:
           page <
           Math.ceil(
             totalProperties /
-              limit
+            limit
           ),
 
         hasPrevious:
@@ -548,10 +630,10 @@ exports.getPropertyById = async (req, res) => {
       try {
         console.log(`On-demand fetching market insights for property ${property._id}...`);
         const marketInsightService = require("../services/marketInsightService");
-        
+
         const bedrooms = property.bedrooms || null;
         const area = property.area || property.carpetArea || property.plotArea || null;
-        
+
         const freshInsight = await marketInsightService.getNormalizedMarketInsight({
           city: property.city,
           locality: property.locality,
@@ -559,7 +641,7 @@ exports.getPropertyById = async (req, res) => {
           bedrooms,
           area,
         });
-        
+
         if (freshInsight) {
           property.marketInsight = freshInsight;
           await property.save();
@@ -570,32 +652,19 @@ exports.getPropertyById = async (req, res) => {
       }
     }
 
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-
-    const rawObj = property.toObject();
     const ownerIdVal = property.ownerId
       ? (property.ownerId._id || property.ownerId).toString()
       : property.createdBy
-      ? (property.createdBy._id || property.createdBy).toString()
-      : "";
+        ? (property.createdBy._id || property.createdBy).toString()
+        : "";
 
-    const propertyData = {
-      ...rawObj,
-      ownerId: ownerIdVal,
-
-      photos: (property.photos || []).map(
-        (photo) => {
-          if (!photo) return "";
-          if (photo.startsWith("http://") || photo.startsWith("https://")) return photo;
-          const clean = photo.replace(/^\/+/, "").replace(/^uploads\/properties\//, "").replace(/^uploads\//, "");
-          return `${baseUrl}/uploads/properties/${clean}`;
-        }
-      ),
-    };
+    const rawObj = property.toObject();
+    const sanitizedData = sanitizePropertyData(rawObj, req);
+    sanitizedData.ownerId = ownerIdVal;
 
     return res.status(200).json({
       success: true,
-      data: propertyData,
+      data: sanitizedData,
     });
 
   } catch (error) {
@@ -606,7 +675,7 @@ exports.getPropertyById = async (req, res) => {
     });
   }
 };
-  exports.getMyPublishedCount = async (req, res) => {
+exports.getMyPublishedCount = async (req, res) => {
   try {
     const userId = req.user._id || req.user.id;
 
@@ -1008,7 +1077,7 @@ exports.requestDelete = async (req, res) => {
     });
   }
 };
-  exports.filterProperties =
+exports.filterProperties =
   async (req, res) => {
     try {
       const {
@@ -1040,16 +1109,18 @@ exports.requestDelete = async (req, res) => {
             bedrooms
           );
 
-      const properties =
+      const rawProperties =
         await Property.find(
           query
         ).sort({
           createdAt: -1,
         });
 
+      const sanitizedProperties = rawProperties.map((p) => sanitizePropertyData(p.toObject(), req));
+
       return res.status(200).json({
         success: true,
-        data: properties,
+        data: sanitizedProperties,
       });
     } catch (error) {
       return res.status(500).json({
@@ -1086,13 +1157,13 @@ exports.updatePropertyStatus = async (
     });
   }
 };
-  exports.searchProperties =
+exports.searchProperties =
   async (req, res) => {
     try {
       const search =
         req.query.search;
 
-      const properties =
+      const rawProperties =
         await Property.find({
           status: "approved",
           isDeleted: { $ne: true },
@@ -1116,19 +1187,21 @@ exports.updatePropertyStatus = async (
             },
             {
               propertyType:
-                {
-                  $regex:
-                    search,
-                  $options:
-                    "i",
-                },
+              {
+                $regex:
+                  search,
+                $options:
+                  "i",
+              },
             },
           ],
         });
 
+      const sanitizedProperties = rawProperties.map((p) => sanitizePropertyData(p.toObject(), req));
+
       return res.status(200).json({
         success: true,
-        data: properties,
+        data: sanitizedProperties,
       });
     } catch (error) {
       return res.status(500).json({
@@ -1139,7 +1212,7 @@ exports.updatePropertyStatus = async (
     }
   };
 
-  exports.approveProperty =
+exports.approveProperty =
   async (req, res) => {
     try {
       const property =
@@ -1167,7 +1240,7 @@ exports.updatePropertyStatus = async (
     }
   };
 
-  exports.rejectProperty =
+exports.rejectProperty =
   async (req, res) => {
     try {
       const property =
@@ -1226,6 +1299,253 @@ exports.getSimilarProperties = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
+    });
+  }
+};
+
+exports.getPropertiesCompare = async (req, res) => {
+  try {
+    const { ids } = req.query;
+    if (!ids) {
+      return res.status(400).json({
+        success: false,
+        message: "Property IDs are required",
+      });
+    }
+
+    const idList = ids.split(",").map(id => id.trim()).filter(Boolean);
+    if (idList.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Property IDs",
+      });
+    }
+
+    const mongoose = require("mongoose");
+    const validIds = idList.filter(id => mongoose.Types.ObjectId.isValid(id));
+    if (validIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid Property IDs provided",
+      });
+    }
+
+    const properties = await Property.find({
+      _id: { $in: validIds },
+      isDeleted: { $ne: true },
+      status: { $in: ["approved", "active", "published"] }
+    }).populate("createdBy", "_id fullName role phone email agencyName");
+
+    const sanitizedProperties = properties.map(p => sanitizePropertyData(p.toObject(), req));
+
+    return res.status(200).json({
+      success: true,
+      data: sanitizedProperties,
+    });
+  } catch (err) {
+    console.error("Error in getPropertiesCompare:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+exports.createPropertyDraft = async (req, res) => {
+  try {
+    const { purpose, propertyType, currentStep } = req.body;
+    if (!purpose || !propertyType) {
+      return res.status(400).json({
+        success: false,
+        message: "Purpose and Property Type are required to initialize a draft",
+      });
+    }
+
+    let serviceableAreaId;
+    let latitude = req.body.latitude;
+    let longitude = req.body.longitude;
+
+    if (req.body.city && req.body.locality) {
+      try {
+        const serviceCheck = await checkPropertyServiceability(req.body);
+        if (serviceCheck.isServiceable) {
+          serviceableAreaId = serviceCheck.matchedLocation._id;
+          latitude = serviceCheck.latitude;
+          longitude = serviceCheck.longitude;
+        }
+      } catch (err) {
+        // Ignore location serviceability failure for drafts
+      }
+    }
+
+    const cleanedData = cleanPropertyDetails(propertyType, req.body);
+
+    const draft = new Property({
+      ...cleanedData,
+      createdBy: req.user._id || req.user.id,
+      ownerId: req.user._id || req.user.id,
+      status: "draft",
+      currentStep: currentStep || 1,
+      latitude,
+      longitude,
+      serviceableAreaId
+    });
+
+    if (req.body.amenities && typeof req.body.amenities === "string") {
+      try { draft.amenities = JSON.parse(req.body.amenities); } catch (e) {}
+    }
+    if (req.body.neighbourhood && typeof req.body.neighbourhood === "string") {
+      try { draft.neighbourhood = JSON.parse(req.body.neighbourhood); } catch (e) {}
+    }
+    if (req.body.pendingIssues && typeof req.body.pendingIssues === "string") {
+      try { draft.pendingIssues = JSON.parse(req.body.pendingIssues); } catch (e) {}
+    }
+    if (req.body.documents && typeof req.body.documents === "string") {
+      try { draft.documents = JSON.parse(req.body.documents); } catch (e) {}
+    }
+    if (req.body.marketInsight && typeof req.body.marketInsight === "string") {
+      try { draft.marketInsight = JSON.parse(req.body.marketInsight); } catch (e) {}
+    }
+
+    await draft.save();
+
+    return res.status(201).json({
+      success: true,
+      data: draft,
+    });
+  } catch (err) {
+    console.error("Error in createPropertyDraft:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+exports.updatePropertyDraft = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const draft = await Property.findOne({ _id: id, createdBy: req.user._id || req.user.id, status: "draft" });
+    if (!draft) {
+      return res.status(404).json({
+        success: false,
+        message: "Draft not found or unauthorized",
+      });
+    }
+
+    let serviceableAreaId = draft.serviceableAreaId;
+    let latitude = req.body.latitude !== undefined ? req.body.latitude : draft.latitude;
+    let longitude = req.body.longitude !== undefined ? req.body.longitude : draft.longitude;
+
+    if (req.body.city || req.body.locality) {
+      const merged = {
+        city: req.body.city || draft.city,
+        locality: req.body.locality || draft.locality,
+        address: req.body.address || draft.address,
+        latitude: req.body.latitude ?? draft.latitude,
+        longitude: req.body.longitude ?? draft.longitude,
+      };
+      try {
+        const serviceCheck = await checkPropertyServiceability(merged);
+        if (serviceCheck.isServiceable) {
+          serviceableAreaId = serviceCheck.matchedLocation._id;
+          latitude = serviceCheck.latitude;
+          longitude = serviceCheck.longitude;
+        }
+      } catch (err) {
+        // Ignore location serviceability failure for drafts
+      }
+    }
+
+    const cleanedData = cleanPropertyDetails(req.body.propertyType || draft.propertyType, req.body);
+
+    if (req.body.amenities && typeof req.body.amenities === "string") {
+      try { req.body.amenities = JSON.parse(req.body.amenities); } catch (e) {}
+    }
+    if (req.body.neighbourhood && typeof req.body.neighbourhood === "string") {
+      try { req.body.neighbourhood = JSON.parse(req.body.neighbourhood); } catch (e) {}
+    }
+    if (req.body.pendingIssues && typeof req.body.pendingIssues === "string") {
+      try { req.body.pendingIssues = JSON.parse(req.body.pendingIssues); } catch (e) {}
+    }
+    if (req.body.documents && typeof req.body.documents === "string") {
+      try { req.body.documents = JSON.parse(req.body.documents); } catch (e) {}
+    }
+    if (req.body.marketInsight && typeof req.body.marketInsight === "string") {
+      try { req.body.marketInsight = JSON.parse(req.body.marketInsight); } catch (e) {}
+    }
+
+    Object.assign(draft, cleanedData);
+    if (req.body.currentStep) draft.currentStep = req.body.currentStep;
+    draft.latitude = latitude;
+    draft.longitude = longitude;
+    draft.serviceableAreaId = serviceableAreaId;
+
+    if (req.body.amenities) draft.amenities = req.body.amenities;
+    if (req.body.neighbourhood) draft.neighbourhood = req.body.neighbourhood;
+    if (req.body.pendingIssues) draft.pendingIssues = req.body.pendingIssues;
+    if (req.body.documents) draft.documents = req.body.documents;
+    if (req.body.marketInsight) draft.marketInsight = req.body.marketInsight;
+
+    await draft.save();
+
+    return res.status(200).json({
+      success: true,
+      data: draft,
+    });
+  } catch (err) {
+    console.error("Error in updatePropertyDraft:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+exports.getPropertyDraft = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const draft = await Property.findOne({ _id: id, createdBy: req.user._id || req.user.id, status: "draft" });
+    if (!draft) {
+      return res.status(404).json({
+        success: false,
+        message: "Draft not found or unauthorized",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: draft,
+    });
+  } catch (err) {
+    console.error("Error in getPropertyDraft:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+exports.deletePropertyDraft = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const draft = await Property.findOneAndDelete({ _id: id, createdBy: req.user._id || req.user.id, status: "draft" });
+    if (!draft) {
+      return res.status(404).json({
+        success: false,
+        message: "Draft not found or unauthorized",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Draft discarded successfully",
+    });
+  } catch (err) {
+    console.error("Error in deletePropertyDraft:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message,
     });
   }
 };

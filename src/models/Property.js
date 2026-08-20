@@ -298,8 +298,12 @@ const propertySchema =
       },
       status: {
         type: String,
-        enum: ["pending", "approved", "rejected"],
+        enum: ["pending", "approved", "rejected", "draft"],
         default: "pending",
+      },
+      currentStep: {
+        type: Number,
+        default: 1,
       },
 
       availabilityStatus: {
