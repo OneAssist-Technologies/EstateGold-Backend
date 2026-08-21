@@ -189,32 +189,35 @@ exports.getLocations = async (req, res) => {
 
       if (loc.city) {
         const cleanCity = loc.city.trim();
-        
-        // Compute average price per sqft from cached localities of this city using estimatedPricePerSqft
+        let fallbackLocality = cleanCity;
+        const lowerCity = cleanCity.toLowerCase();
+        if (lowerCity === "chennai") {
+          fallbackLocality = "Anna Nagar";
+        } else if (lowerCity.includes("coimbatore south")) {
+          fallbackLocality = "Peelamedu";
+        } else if (lowerCity.includes("coimbatore north")) {
+          fallbackLocality = "Gandhipuram";
+        } else if (lowerCity.includes("avinashi")) {
+          fallbackLocality = "Avinashi";
+        }
+
+        // Check if we have any cached records for this city (even unsupported/failed lookups)
         const cachedLocalities = await LocalityInsightCache.find({
-          city: { $regex: new RegExp(`^${cleanCity}$`, "i") },
-          estimatedPricePerSqft: { $gt: 0 }
+          city: { $regex: new RegExp(`^${cleanCity}$`, "i") }
         });
-        
+
         if (cachedLocalities.length > 0) {
-          const sum = cachedLocalities.reduce((s, c) => s + c.estimatedPricePerSqft, 0);
-          avgPrice = Math.round(sum / cachedLocalities.length);
+          const pricingLocalities = cachedLocalities.filter(c => c.estimatedPricePerSqft && c.estimatedPricePerSqft > 0);
+          if (pricingLocalities.length > 0) {
+            const sum = pricingLocalities.reduce((s, c) => s + c.estimatedPricePerSqft, 0);
+            avgPrice = Math.round(sum / pricingLocalities.length);
+          } else {
+            avgPrice = null;
+          }
         } else {
           // Dynamic fetch: if no cached locality pricing is found, trigger a fallback fetch for this city name using a primary locality
           try {
             const marketInsightService = require("../services/marketInsightService");
-            
-            let fallbackLocality = cleanCity;
-            const lowerCity = cleanCity.toLowerCase();
-            if (lowerCity === "chennai") {
-              fallbackLocality = "Anna Nagar";
-            } else if (lowerCity.includes("coimbatore south")) {
-              fallbackLocality = "Peelamedu";
-            } else if (lowerCity.includes("coimbatore north")) {
-              fallbackLocality = "Gandhipuram";
-            } else if (lowerCity.includes("avinashi")) {
-              fallbackLocality = "Avinashi";
-            }
 
             console.log(`Triggering dynamic fallback fetch for ${cleanCity} using locality ${fallbackLocality}...`);
             const freshInsight = await marketInsightService.getNormalizedMarketInsight({
@@ -222,10 +225,11 @@ exports.getLocations = async (req, res) => {
               locality: fallbackLocality,
               propertyType: "Apartment / Flat",
             });
-            if (freshInsight && freshInsight.estimatedPricePerSqft) {
-              avgPrice = freshInsight.estimatedPricePerSqft;
-              
-              // Cache it so it's resolved for future requests
+
+            if (freshInsight) {
+              avgPrice = freshInsight.estimatedPricePerSqft || null;
+
+              // Cache the result (even if estimatedPricePerSqft is null or unsupported) so we don't query it again
               await LocalityInsightCache.findOneAndUpdate(
                 {
                   country: "India",
@@ -257,6 +261,35 @@ exports.getLocations = async (req, res) => {
             }
           } catch (err) {
             console.error(`Dynamic location price resolution failed for ${cleanCity}:`, err.message);
+            // Cache a negative/empty lookup so we don't retry on every single subsequent request
+            await LocalityInsightCache.findOneAndUpdate(
+              {
+                country: "India",
+                state: loc.state || "",
+                city: cleanCity,
+                locality: fallbackLocality,
+                propertyType: "Apartment / Flat",
+                bedrooms: null,
+              },
+              {
+                country: "India",
+                state: loc.state || "",
+                city: cleanCity,
+                locality: fallbackLocality,
+                propertyType: "Apartment / Flat",
+                bedrooms: null,
+                supported: false,
+                message: `Failed fallback fetch: ${err.message}`,
+                averageLocalityPrice: null,
+                estimatedPricePerSqft: null,
+                comparableCount: 0,
+                estimatedPropertyValue: null,
+                confidence: null,
+                marketData: null,
+                retrievedAt: new Date().toISOString(),
+              },
+              { upsert: true, new: true }
+            ).catch(cacheErr => console.error("Failed to write error state to cache:", cacheErr));
           }
         }
       }

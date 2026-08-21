@@ -3,6 +3,7 @@ const Location = require("../models/Location");
 const User = require("../models/User");
 const { checkPropertyServiceability } = require("../utils/geoUtils");
 const jwt = require("jsonwebtoken");
+const { calculateMatchScore } = require("./aiController");
 
 const getOptionalUser = (req) => {
   try {
@@ -411,6 +412,166 @@ exports.getProperties = async (req, res) => {
       role,
     } = req.query;
 
+    let aiFilters = null;
+    if (search && search.trim() !== "") {
+      try {
+        const searchParserService = require("../services/ai/searchParserService");
+        const parsed = await searchParserService.parseSearchQuery(search.trim());
+        if (parsed && parsed.success) {
+          aiFilters = parsed;
+          console.log("AI Parsed Search filters:", parsed);
+        }
+      } catch (err) {
+        console.error("AI parseSearchQuery failed, fallback to standard parsing:", err);
+      }
+    }
+
+    const getFilterVal = (paramKey, aiKey) => {
+      if (req.query[paramKey] && req.query[paramKey].trim() !== "") {
+        return req.query[paramKey];
+      }
+      if (aiFilters && aiFilters[aiKey] !== undefined && aiFilters[aiKey] !== null) {
+        return String(aiFilters[aiKey]);
+      }
+      return null;
+    };
+
+    // --- Nearby Locality Fallback Search ---
+    if (req.query.nearby === "true") {
+      let targetLat = null;
+      let targetLng = null;
+
+      const activeLocality = getFilterVal("locality", "locality");
+      const activeCity = getFilterVal("city", "city");
+      const activePropertyType = getFilterVal("propertyType", "propertyType");
+      const activeBedrooms = getFilterVal("bedrooms", "bedrooms");
+      const activePurpose = getFilterVal("purpose", "purpose");
+
+      if (activeLocality && activeCity) {
+        const refProp = await Property.findOne({
+          city: { $regex: new RegExp(activeCity.trim(), "i") },
+          locality: { $regex: new RegExp(activeLocality.trim(), "i") },
+          latitude: { $exists: true, $ne: null },
+          longitude: { $exists: true, $ne: null },
+          isDeleted: { $ne: true },
+          status: { $in: ["approved", "active", "published"] }
+        });
+        if (refProp) {
+          targetLat = refProp.latitude;
+          targetLng = refProp.longitude;
+        }
+      }
+
+      if (!targetLat && activeCity) {
+        const locationDoc = await Location.findOne({
+          city: { $regex: new RegExp(activeCity.trim(), "i") },
+          status: "active"
+        });
+        if (locationDoc) {
+          targetLat = locationDoc.latitude;
+          targetLng = locationDoc.longitude;
+        }
+      }
+
+      if (!targetLat) {
+        targetLat = 11.0168;
+        targetLng = 76.9558;
+      }
+
+      const nearbyQuery = {
+        isDeleted: { $ne: true },
+        status: { $in: ["approved", "active", "published"] },
+        availabilityStatus: { $ne: "sold" }
+      };
+
+      if (activeCity) {
+        nearbyQuery.city = { $regex: new RegExp(activeCity.trim(), "i") };
+      }
+      if (activeLocality) {
+        nearbyQuery.locality = { $not: new RegExp(activeLocality.trim(), "i") };
+      }
+      if (activeBedrooms) {
+        const bNum = Number(activeBedrooms);
+        if (bNum >= 5) {
+          nearbyQuery.bedrooms = { $gte: 5 };
+        } else if (!isNaN(bNum) && bNum > 0) {
+          nearbyQuery.bedrooms = bNum;
+        }
+      }
+      if (activePropertyType) {
+        const pType = activePropertyType.trim();
+        if (/apartment|flat/i.test(pType)) {
+          nearbyQuery.propertyType = { $regex: /apartment|flat/i };
+        } else if (/house|independent/i.test(pType)) {
+          nearbyQuery.propertyType = { $regex: /house|independent/i };
+        } else if (/plot|land/i.test(pType)) {
+          nearbyQuery.propertyType = { $regex: /plot|land/i };
+        } else if (/commercial/i.test(pType)) {
+          nearbyQuery.propertyType = { $regex: /commercial/i };
+        } else if (/builder|floor/i.test(pType)) {
+          nearbyQuery.propertyType = { $regex: /builder|floor/i };
+        } else if (/villa/i.test(pType)) {
+          nearbyQuery.propertyType = { $regex: /villa/i };
+        } else {
+          nearbyQuery.propertyType = { $regex: new RegExp(pType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+        }
+      }
+      if (activePurpose) {
+        const purpTrim = activePurpose.trim().toLowerCase();
+        if (purpTrim === "rent" || purpTrim === "for rent" || purpTrim === "lease") {
+          nearbyQuery.purpose = { $regex: /rent|lease/i };
+        } else if (purpTrim === "buy" || purpTrim === "sale" || purpTrim === "sell" || purpTrim === "for sale") {
+          nearbyQuery.purpose = { $regex: /buy|sale|sell/i };
+        } else {
+          nearbyQuery.purpose = { $regex: new RegExp(activePurpose.trim(), "i") };
+        }
+      }
+
+      const allDocs = await Property.find(nearbyQuery);
+
+      const getDistance = (lat1, lon1, lat2, lon2) => {
+        if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = 
+          Math.sin(dLat/2) * Math.sin(dLat/2) +
+          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+          Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+      };
+
+      const docsWithDist = allDocs.map(doc => {
+        const docObj = doc.toObject();
+        const distance = getDistance(targetLat, targetLng, docObj.latitude, docObj.longitude);
+        return {
+          ...docObj,
+          distance: isNaN(distance) ? Infinity : distance
+        };
+      });
+
+      docsWithDist.sort((a, b) => a.distance - b.distance);
+
+      const totalProperties = docsWithDist.length;
+      const paginatedDocs = docsWithDist.slice(skip, skip + limit);
+      const properties = paginatedDocs.map(p => sanitizePropertyData(p, req));
+
+      return res.status(200).json({
+        success: true,
+        data: properties,
+        isNearbyResults: true,
+        pagination: {
+          page,
+          limit,
+          totalProperties,
+          totalPages: Math.ceil(totalProperties / limit) || 1,
+          hasNext: page < Math.ceil(totalProperties / limit),
+          hasPrevious: page > 1
+        }
+      });
+    }
+
     const query = {
       isDeleted: { $ne: true },
       status: { $in: ["approved", "active", "published"] },
@@ -419,12 +580,11 @@ exports.getProperties = async (req, res) => {
     if (availabilityStatus && availabilityStatus !== "") {
       query.availabilityStatus = availabilityStatus;
     } else {
-      // Exclude sold properties from active public property listings
       query.availabilityStatus = { $ne: "sold" };
     }
 
-    // Search
-    if (search && search.trim() !== "") {
+    // Direct search matching fallback (if AI parse not available)
+    if (!aiFilters && search && search.trim() !== "") {
       const cleanSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       query.$or = [
         { city: { $regex: cleanSearch, $options: "i" } },
@@ -436,46 +596,78 @@ exports.getProperties = async (req, res) => {
       ];
     }
 
+    // Resolve query parameters using direct query param or AI parsed query
+    const activePurpose = getFilterVal("purpose", "purpose");
+    const activeCity = getFilterVal("city", "city");
+    const activePropertyType = getFilterVal("propertyType", "propertyType");
+    const activeBedrooms = getFilterVal("bedrooms", "bedrooms");
+    const activeFurnishing = getFilterVal("furnishing", "furnishing");
+    const activeMinPrice = getFilterVal("minPrice", "minPrice");
+    const activeMaxPrice = getFilterVal("maxPrice", "maxPrice");
+    const activeLocality = getFilterVal("locality", "locality");
+
     // Purpose
-    if (purpose && purpose.trim() !== "") {
-      const purpTrim = purpose.trim().toLowerCase();
+    if (activePurpose && activePurpose.trim() !== "") {
+      const purpTrim = activePurpose.trim().toLowerCase();
       if (purpTrim === "rent" || purpTrim === "for rent" || purpTrim === "lease") {
         query.purpose = { $regex: /rent|lease/i };
       } else if (purpTrim === "buy" || purpTrim === "sale" || purpTrim === "sell" || purpTrim === "for sale") {
         query.purpose = { $regex: /buy|sale|sell/i };
       } else {
-        query.purpose = { $regex: new RegExp(purpose.trim(), "i") };
+        query.purpose = { $regex: new RegExp(activePurpose.trim(), "i") };
       }
     }
 
     // City
-    if (city && city.trim() !== "") {
-      query.city = { $regex: new RegExp(city.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+    if (activeCity && activeCity.trim() !== "") {
+      query.city = { $regex: new RegExp(activeCity.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+    }
+
+    // Locality
+    if (activeLocality && activeLocality.trim() !== "") {
+      query.locality = { $regex: new RegExp(activeLocality.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
     }
 
     // Property Type
-    if (propertyType && propertyType.trim() !== "") {
-      const pType = propertyType.trim();
-      if (/apartment|flat/i.test(pType)) {
-        query.propertyType = { $regex: /apartment|flat/i };
-      } else if (/house|independent/i.test(pType)) {
-        query.propertyType = { $regex: /house|independent/i };
-      } else if (/plot|land/i.test(pType)) {
-        query.propertyType = { $regex: /plot|land/i };
-      } else if (/commercial/i.test(pType)) {
-        query.propertyType = { $regex: /commercial/i };
-      } else if (/builder|floor/i.test(pType)) {
-        query.propertyType = { $regex: /builder|floor/i };
-      } else if (/villa/i.test(pType)) {
-        query.propertyType = { $regex: /villa/i };
+    if (activePropertyType && activePropertyType.trim() !== "") {
+      const pType = activePropertyType.trim();
+      const dbPropertyTypes = [
+        "Agricultural Land", "Apartment / Flat", "Builder / New Project", "Builder Floor",
+        "Commercial Space", "Hotel / Resort", "Independent House", "Industrial Property",
+        "Office Space", "PG / Hostel", "Plot / Land", "Residential Plot", "Shop / Retail",
+        "Villa", "Warehouse"
+      ];
+      
+      const exactType = dbPropertyTypes.find(t => t.toLowerCase() === pType.toLowerCase());
+      if (exactType) {
+        query.propertyType = exactType;
       } else {
-        query.propertyType = { $regex: new RegExp(pType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+        // Fallback to grouped/partial logic
+        if (/apartment|flat/i.test(pType)) {
+          query.propertyType = { $regex: /apartment|flat/i };
+        } else if (/house|independent/i.test(pType)) {
+          query.propertyType = { $regex: /house|independent/i };
+        } else if (/plot|land/i.test(pType)) {
+          if (pType.toLowerCase() === "plot" || pType.toLowerCase() === "plot / land" || pType.toLowerCase() === "residential plot") {
+            query.propertyType = { $in: ["Plot / Land", "Residential Plot"] };
+          } else {
+            query.propertyType = { $regex: /plot|land/i };
+          }
+        } else if (/commercial/i.test(pType)) {
+          query.propertyType = { $regex: /commercial/i };
+        } else if (/builder|floor/i.test(pType)) {
+          query.propertyType = { $regex: /builder|floor/i };
+        } else if (/villa/i.test(pType)) {
+          query.propertyType = { $regex: /villa/i };
+        } else {
+          query.propertyType = { $regex: new RegExp(pType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+        }
       }
     }
 
     // Bedrooms
-    if (bedrooms && bedrooms.trim() !== "") {
-      const bNum = Number(bedrooms);
+    if (activeBedrooms && activeBedrooms.trim() !== "") {
+      const bNum = Number(activeBedrooms);
       if (bNum >= 5) {
         query.bedrooms = { $gte: 5 };
       } else if (!isNaN(bNum)) {
@@ -484,27 +676,43 @@ exports.getProperties = async (req, res) => {
     }
 
     // Furnishing
-    if (furnishing && furnishing.trim() !== "") {
-      query.furnishing = { $regex: new RegExp(furnishing.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+    if (activeFurnishing && activeFurnishing.trim() !== "") {
+      query.furnishing = { $regex: new RegExp(activeFurnishing.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
     }
 
     // Price Filter
-    if ((minPrice && minPrice.trim() !== "") || (maxPrice && maxPrice.trim() !== "")) {
+    if ((activeMinPrice && activeMinPrice.trim() !== "") || (activeMaxPrice && activeMaxPrice.trim() !== "")) {
       query.price = {};
 
-      if (minPrice && minPrice.trim() !== "") {
-        const minVal = Number(minPrice);
+      if (activeMinPrice && activeMinPrice.trim() !== "") {
+        const minVal = Number(activeMinPrice);
         if (!isNaN(minVal)) {
           query.price.$gte = minVal;
         }
       }
 
-      if (maxPrice && maxPrice.trim() !== "") {
-        const maxVal = Number(maxPrice);
+      if (activeMaxPrice && activeMaxPrice.trim() !== "") {
+        const maxVal = Number(activeMaxPrice);
         if (!isNaN(maxVal)) {
           query.price.$lte = maxVal;
         }
       }
+    }
+
+    // Amenities (Extracted by AI)
+    const activeAmenities = (aiFilters && aiFilters.amenities && Array.isArray(aiFilters.amenities)) ? aiFilters.amenities : [];
+    if (activeAmenities.length > 0) {
+      activeAmenities.forEach(amenity => {
+        const clean = amenity.trim().toLowerCase();
+        if (clean === "parking") {
+          query.parking = true;
+        } else if (clean === "lift") {
+          query.lift = true;
+        } else {
+          if (!query.amenities) query.amenities = { $all: [] };
+          query.amenities.$all.push(new RegExp(clean, "i"));
+        }
+      });
     }
 
     // Role filter (seller/owner vs agent based on property tag listingType)
@@ -516,6 +724,7 @@ exports.getProperties = async (req, res) => {
         query.listingType = "another_owner";
       }
     }
+
 
     // Sorting
 
@@ -560,7 +769,30 @@ exports.getProperties = async (req, res) => {
         .skip(skip)
         .limit(limit);
 
-    const properties = docs.map((property) => sanitizePropertyData(property.toObject(), req));
+    let properties = docs.map((property) => sanitizePropertyData(property.toObject(), req));
+
+    const activeFilters = {
+      purpose: activePurpose,
+      propertyType: activePropertyType,
+      city: activeCity,
+      locality: activeLocality,
+      bedrooms: activeBedrooms,
+      minPrice: activeMinPrice,
+      maxPrice: activeMaxPrice
+    };
+
+    const hasFilters = Object.values(activeFilters).some(v => v !== undefined && v !== null && String(v).trim() !== "");
+    if (hasFilters) {
+      properties = properties.map(property => {
+        const matchInfo = calculateMatchScore(property, activeFilters);
+        return {
+          ...property,
+          matchScore: matchInfo.score,
+          matchedDetails: matchInfo.matched,
+          mismatchedDetails: matchInfo.mismatched
+        };
+      });
+    }
 
     const baseUrl = `${req.protocol}://${req.get(
       "host"
