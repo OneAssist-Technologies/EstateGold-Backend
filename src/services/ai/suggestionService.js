@@ -45,12 +45,18 @@ const generateFallbackSuggestions = (p) => {
   };
 };
 
+let isAILimitReached = false;
+
 /**
  * Generate smart highlights and tags for a property listing.
  * @param {Object} property 
  * @returns {Promise<Object>} tags, highlights, buyerProfile
  */
 const generateSuggestions = async (property) => {
+  if (isAILimitReached) {
+    return generateFallbackSuggestions(property);
+  }
+
   try {
     const userMsg = userPrompt(property);
     
@@ -74,7 +80,12 @@ const generateSuggestions = async (property) => {
       fallback: false
     };
   } catch (err) {
-    console.warn("AI Suggestions failed, falling back to rule-based suggestions:", err.message);
+    if (err.status === 429 || (err.message && (err.message.includes("quota") || err.message.includes("429")))) {
+      isAILimitReached = true;
+      console.warn("AI suggestions quota exceeded or rate limited. Bypassing OpenAI and falling back to rule-based suggestions silently for future requests. Error details:", err.message);
+    } else {
+      console.warn("AI Suggestions failed, falling back to rule-based suggestions:", err.message);
+    }
     return generateFallbackSuggestions(property);
   }
 };
