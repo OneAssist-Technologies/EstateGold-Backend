@@ -1,19 +1,26 @@
-require("dotenv").config();
+require("dotenv").config({ override: true });
 
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
 
 const connectDB = require("./config/db");
+const seedAdmin = require("./seed/createAdmin");
 
 const authRoutes = require("./src/routes/authRoutes");
 const propertyRoutes = require("./src/routes/propertyRoutes");
 const adminRoutes = require("./src/routes/adminRoutes");
+const locationRoutes = require("./src/routes/locationRoutes");
+const marketInsightRoutes = require("./src/routes/marketInsightRoutes");
+const aiRoutes = require("./src/routes/aiRoutes");
+const enquiryRoutes = require("./src/routes/enquiryRoutes");
 
 const app = express();
 
-// Database Connection
-connectDB();
+// Database Connection & Auto Seeding
+connectDB().then(() => {
+  seedAdmin();
+});
 
 // Middleware
 app.use(cors());
@@ -28,25 +35,20 @@ app.use(
 
 app.use(
   "/uploads",
-  express.static(
-    path.join(
-      __dirname,
-      "uploads"
-    )
-  )
+  express.static(path.join(__dirname, "uploads")),
+  express.static(path.join(__dirname, "../uploads"))
 );
 
+app.use("/admin/locations", locationRoutes);
 app.use("/admin", adminRoutes);
 
 // Routes
-app.use(
-  authRoutes
-);
-
-app.use(
- propertyRoutes 
-  
-);
+app.use(authRoutes);
+app.use(propertyRoutes);
+app.use(enquiryRoutes);
+app.use("/api/locations", locationRoutes);
+app.use("/market-insight", marketInsightRoutes);
+app.use("/api/ai", aiRoutes);
 
 // Health Check
 app.get("/", (req, res) => {

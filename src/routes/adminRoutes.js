@@ -19,6 +19,20 @@ router.get(
 );
 
 router.get(
+  "/analytics",
+  auth,
+  admin,
+  controller.getAnalytics
+);
+
+router.get(
+  "/unread-counts",
+  auth,
+  admin,
+  controller.getUnreadCounts
+);
+
+router.get(
   "/properties",
   auth,
   admin,
@@ -52,5 +66,31 @@ router.delete(
   admin,
   controller.deleteProperty
 );
+
+router.patch(
+  "/properties/:id/reject-delete-request",
+  auth,
+  admin,
+  controller.rejectDeleteRequest
+);
+
+router.patch(
+  "/properties/:id/availability-status",
+  auth,
+  admin,
+  controller.updatePropertyAvailabilityStatus
+);
+
+// User Management Routes
+router.get("/users", auth, admin, controller.getUsers);
+router.patch("/users/:id/verify", auth, admin, controller.toggleUserVerify);
+router.patch("/users/:id/status", auth, admin, controller.toggleUserStatus);
+router.delete("/users/:id", auth, admin, controller.deleteUser);
+
+// Settings & Access Control Routes
+router.get("/settings", auth, admin, controller.getSystemSettings);
+router.put("/settings", auth, admin, controller.updateSystemSettings);
+router.get("/staff-users", auth, admin, controller.getStaffUsers);
+router.put("/users/:id/permissions", auth, admin, controller.updateUserPermissions);
 
 module.exports = router;
