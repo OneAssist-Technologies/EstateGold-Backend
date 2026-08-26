@@ -113,7 +113,10 @@ exports.getProperties = async (req, res) => {
         filter.deleteRequested = true;
       } else {
         filter.status = req.query.status;
+        filter.deleteRequested = { $ne: true };
       }
+    } else {
+      filter.deleteRequested = { $ne: true };
     }
 
     if (req.query.type) {
@@ -182,10 +185,10 @@ exports.getProperties = async (req, res) => {
       return p;
     });
 
-    const totalCount = await Property.countDocuments({ isDeleted: false });
-    const pendingCount = await Property.countDocuments({ isDeleted: false, status: "pending" });
-    const approvedCount = await Property.countDocuments({ isDeleted: false, status: "approved" });
-    const rejectedCount = await Property.countDocuments({ isDeleted: false, status: "rejected" });
+    const totalCount = await Property.countDocuments({ isDeleted: false, deleteRequested: { $ne: true } });
+    const pendingCount = await Property.countDocuments({ isDeleted: false, status: "pending", deleteRequested: { $ne: true } });
+    const approvedCount = await Property.countDocuments({ isDeleted: false, status: "approved", deleteRequested: { $ne: true } });
+    const rejectedCount = await Property.countDocuments({ isDeleted: false, status: "rejected", deleteRequested: { $ne: true } });
     const deleteRequestsCount = await Property.countDocuments({ isDeleted: false, deleteRequested: true });
 
     res.json({
@@ -714,11 +717,11 @@ exports.getAnalytics = async (req, res) => {
     ]);
 
     const defaultTypesMap = new Map([
-      ["Apartment", 0],
-      ["Villa", 0],
-      ["House", 0],
-      ["Plot", 0],
-      ["Commercial", 0],
+      ["Apartment / Flat", 0],
+      ["Independent House", 0],
+      ["Plot / Land", 0],
+      ["Builder Floor", 0],
+      ["Commercial Space", 0],
     ]);
 
     typeAgg.forEach((item) => {
@@ -749,8 +752,14 @@ exports.getAnalytics = async (req, res) => {
         $or: [{ serviceableAreaId: loc._id }, { city: { $regex: new RegExp(`^${loc.city}$`, "i") } }],
       });
 
-      const soldInCity = Math.round(activeInCity * 0.15);
-      const availableInCity = activeInCity - soldInCity;
+      const soldInCity = await Property.countDocuments({
+        isDeleted: false,
+        status: "approved",
+        availabilityStatus: "sold",
+        $or: [{ serviceableAreaId: loc._id }, { city: { $regex: new RegExp(`^${loc.city}$`, "i") } }],
+      });
+
+      const availableInCity = Math.max(0, activeInCity - soldInCity);
 
       serviceAreaStats.push({
         serviceArea: loc.city,
@@ -826,23 +835,25 @@ exports.getAnalytics = async (req, res) => {
         createdAt: { $gte: d, $lt: nextMonth },
       });
 
-      const approvedCount = await Property.countDocuments({
+      const sold = await Property.countDocuments({
         isDeleted: false,
-        status: "approved",
-        createdAt: { $gte: d, $lt: nextMonth },
+        availabilityStatus: "sold",
+        purpose: { $regex: /buy|sale|sell/i },
+        updatedAt: { $gte: d, $lt: nextMonth },
       });
 
-      const rCount = await Property.countDocuments({
+      const rented = await Property.countDocuments({
         isDeleted: false,
+        availabilityStatus: "sold",
         purpose: { $regex: /rent|lease/i },
-        createdAt: { $gte: d, $lt: nextMonth },
+        updatedAt: { $gte: d, $lt: nextMonth },
       });
 
       monthlyOverview.push({
         month: `${monthNames[d.getMonth()]} ${d.getFullYear()}`,
         added: added,
-        sold: Math.round(approvedCount * 0.6),
-        rented: rCount,
+        sold: sold,
+        rented: rented,
       });
     }
 

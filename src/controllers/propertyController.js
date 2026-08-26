@@ -40,7 +40,7 @@ const formatDocUrl = (url, baseUrl) => {
 const sanitizePropertyData = (propertyObj, req) => {
   const baseUrl = `${req.protocol}://${req.get("host")}`;
   const user = getOptionalUser(req);
-  
+
   // Format photos
   const photos = (propertyObj.photos || []).map((photo) => {
     if (!photo) return "";
@@ -50,7 +50,7 @@ const sanitizePropertyData = (propertyObj, req) => {
   });
 
   const hasDocs = propertyObj.documents && propertyObj.documents.length > 0;
-  
+
   // Check authorization
   let isAuthorized = false;
   if (user) {
@@ -62,13 +62,13 @@ const sanitizePropertyData = (propertyObj, req) => {
         : propertyObj.createdBy
           ? (propertyObj.createdBy._id || propertyObj.createdBy).toString()
           : "";
-      
+
       const createdBy = propertyObj.createdBy
         ? (propertyObj.createdBy._id || propertyObj.createdBy).toString()
         : "";
-        
+
       const currentUserId = user._id ? user._id.toString() : "";
-      
+
       if (currentUserId && (currentUserId === ownerId || currentUserId === createdBy)) {
         isAuthorized = true;
       }
@@ -534,11 +534,11 @@ exports.getProperties = async (req, res) => {
         const R = 6371;
         const dLat = (lat2 - lat1) * Math.PI / 180;
         const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = 
-          Math.sin(dLat/2) * Math.sin(dLat/2) +
-          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-          Math.sin(dLon/2) * Math.sin(dLon/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+          Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return R * c;
       };
 
@@ -637,7 +637,7 @@ exports.getProperties = async (req, res) => {
         "Office Space", "PG / Hostel", "Plot / Land", "Residential Plot", "Shop / Retail",
         "Villa", "Warehouse"
       ];
-      
+
       const exactType = dbPropertyTypes.find(t => t.toLowerCase() === pType.toLowerCase());
       if (exactType) {
         query.propertyType = exactType;
@@ -991,15 +991,22 @@ exports.getMyProperties = async (req, res) => {
 
     const baseUrl = `${req.protocol}://${req.get("host")}`;
 
-    const formattedProperties = properties.map((property) => ({
-      ...property.toObject(),
-      photos: (property.photos || []).map((photo) => {
-        if (!photo) return "";
-        if (photo.startsWith("http://") || photo.startsWith("https://")) return photo;
-        const clean = photo.replace(/^\/+/, "").replace(/^uploads\/properties\//, "").replace(/^uploads\//, "");
-        return `${baseUrl}/uploads/properties/${clean}`;
-      }),
-    }));
+    const Enquiry = require("../models/Enquiry");
+    const formattedProperties = await Promise.all(
+      properties.map(async (property) => {
+        const enquiriesCount = await Enquiry.countDocuments({ propertyId: property._id });
+        return {
+          ...property.toObject(),
+          enquiries: new Array(enquiriesCount).fill({}),
+          photos: (property.photos || []).map((photo) => {
+            if (!photo) return "";
+            if (photo.startsWith("http://") || photo.startsWith("https://")) return photo;
+            const clean = photo.replace(/^\/+/, "").replace(/^uploads\/properties\//, "").replace(/^uploads\//, "");
+            return `${baseUrl}/uploads/properties/${clean}`;
+          }),
+        };
+      })
+    );
 
     const allUserProperties = await Property.find({
       createdBy: { $in: [userId, String(userId)] },
@@ -1624,19 +1631,19 @@ exports.createPropertyDraft = async (req, res) => {
     });
 
     if (req.body.amenities && typeof req.body.amenities === "string") {
-      try { draft.amenities = JSON.parse(req.body.amenities); } catch (e) {}
+      try { draft.amenities = JSON.parse(req.body.amenities); } catch (e) { }
     }
     if (req.body.neighbourhood && typeof req.body.neighbourhood === "string") {
-      try { draft.neighbourhood = JSON.parse(req.body.neighbourhood); } catch (e) {}
+      try { draft.neighbourhood = JSON.parse(req.body.neighbourhood); } catch (e) { }
     }
     if (req.body.pendingIssues && typeof req.body.pendingIssues === "string") {
-      try { draft.pendingIssues = JSON.parse(req.body.pendingIssues); } catch (e) {}
+      try { draft.pendingIssues = JSON.parse(req.body.pendingIssues); } catch (e) { }
     }
     if (req.body.documents && typeof req.body.documents === "string") {
-      try { draft.documents = JSON.parse(req.body.documents); } catch (e) {}
+      try { draft.documents = JSON.parse(req.body.documents); } catch (e) { }
     }
     if (req.body.marketInsight && typeof req.body.marketInsight === "string") {
-      try { draft.marketInsight = JSON.parse(req.body.marketInsight); } catch (e) {}
+      try { draft.marketInsight = JSON.parse(req.body.marketInsight); } catch (e) { }
     }
 
     await draft.save();
@@ -1692,19 +1699,19 @@ exports.updatePropertyDraft = async (req, res) => {
     const cleanedData = cleanPropertyDetails(req.body.propertyType || draft.propertyType, req.body);
 
     if (req.body.amenities && typeof req.body.amenities === "string") {
-      try { req.body.amenities = JSON.parse(req.body.amenities); } catch (e) {}
+      try { req.body.amenities = JSON.parse(req.body.amenities); } catch (e) { }
     }
     if (req.body.neighbourhood && typeof req.body.neighbourhood === "string") {
-      try { req.body.neighbourhood = JSON.parse(req.body.neighbourhood); } catch (e) {}
+      try { req.body.neighbourhood = JSON.parse(req.body.neighbourhood); } catch (e) { }
     }
     if (req.body.pendingIssues && typeof req.body.pendingIssues === "string") {
-      try { req.body.pendingIssues = JSON.parse(req.body.pendingIssues); } catch (e) {}
+      try { req.body.pendingIssues = JSON.parse(req.body.pendingIssues); } catch (e) { }
     }
     if (req.body.documents && typeof req.body.documents === "string") {
-      try { req.body.documents = JSON.parse(req.body.documents); } catch (e) {}
+      try { req.body.documents = JSON.parse(req.body.documents); } catch (e) { }
     }
     if (req.body.marketInsight && typeof req.body.marketInsight === "string") {
-      try { req.body.marketInsight = JSON.parse(req.body.marketInsight); } catch (e) {}
+      try { req.body.marketInsight = JSON.parse(req.body.marketInsight); } catch (e) { }
     }
 
     Object.assign(draft, cleanedData);

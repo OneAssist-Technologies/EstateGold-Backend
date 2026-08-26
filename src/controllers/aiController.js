@@ -442,7 +442,8 @@ const dynamicFallbackParser = async (messages, currentFilters = {}) => {
   // 4. Extract Property Type
   const typeKeywords = {
     "Apartment / Flat": ["apartment", "flat", "flats", "apartments"],
-    "Independent House": ["independent house", "house", "villa", "home", "independent home"],
+    "Villa": ["villa", "villas"],
+    "Independent House": ["independent house", "house", "home", "independent home"],
     "Plot / Land": ["plot", "land", "lands", "plots", "residential plot", "agricultural land"],
     "Builder Floor": ["builder floor", "floor"],
     "Commercial Space": ["commercial", "office", "shop", "retail", "warehouse"]
@@ -475,8 +476,37 @@ const dynamicFallbackParser = async (messages, currentFilters = {}) => {
         }
       }
     }
+
+    // Fallback extraction if no city or locality was matched from the database
+    if (!filters.city && !filters.locality) {
+      // 5.a Check if there is an explicit "in/at/for/show/near/around [location]" pattern
+      const inLocationMatch = cleanMsg.match(/(?:in|at|for|near|around|show)\s+([a-z\s]+?)(?:\s+under|\s+below|\s+above|\s+with|\s+bhk|\s+bedroom|\s+apartment|\s+flat|\s+house|\s+villa|$)/);
+      const stopWords = ['buy', 'rent', 'lease', 'sale', 'sell', 'apartment', 'flat', 'house', 'villa', 'home', 'plot', 'land', 'floor', 'commercial', 'office', 'shop', 'retail', 'warehouse', 'bhk', 'bedroom', 'hello', 'hi', 'hey', 'eyva', 'properties', 'property', 'show', 'find', 'search', 'get', 'list', 'yes', 'no', 'cheap', 'budget', 'lakh', 'crore', 'lakhs', 'crores', 'please', 'thanks', 'thank', 'you', 'me'];
+      
+      if (inLocationMatch) {
+        const matchedLocation = inLocationMatch[1].trim();
+        if (matchedLocation && !stopWords.includes(matchedLocation)) {
+          const capitalized = matchedLocation.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+          filters.city = capitalized;
+        }
+      } else {
+        // 5.b If the user message is just 1 or 2 words (e.g. "salem")
+        const words = cleanMsg.split(/\s+/);
+        if (words.length <= 2) {
+          const hasStopWord = words.some(w => stopWords.includes(w));
+          if (!hasStopWord) {
+            const capitalized = words.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+            filters.city = capitalized;
+          }
+        }
+      }
+    }
   } catch (err) {
     console.error("Dynamic location extraction failed:", err.message);
+  }
+
+  if (filters.locality && filters.city && filters.locality.toLowerCase().trim() === filters.city.toLowerCase().trim()) {
+    filters.locality = "";
   }
 
   // 6. Extract Amenities dynamically from user input
@@ -516,23 +546,97 @@ const dynamicFallbackParser = async (messages, currentFilters = {}) => {
   let suggestions = [];
 
   if (filters.locality || filters.city) {
-    shouldSearch = true;
     const locName = filters.locality || filters.city;
-    const pTypeStr = filters.propertyType ? ` ${filters.propertyType.toLowerCase()}` : " properties";
-    const purpStr = filters.purpose ? ` for ${filters.purpose.toLowerCase()}` : "";
     
-    let extraCriteria = "";
-    if (filters.bedrooms) extraCriteria += ` (${filters.bedrooms} BHK)`;
-    if (filters.maxPrice) {
-      const priceLakhs = filters.maxPrice / 100000;
-      extraCriteria += ` under ₹${priceLakhs >= 100 ? (priceLakhs / 100).toFixed(1) + ' Cr' : priceLakhs.toFixed(0) + ' Lakhs'}`;
+    // Check if the location actually has properties in the database
+    let hasProperties = false;
+    let availableCities = [];
+    try {
+      const Property = require("../models/Property");
+      const locQuery = { status: "approved", isDeleted: { $ne: true } };
+      if (filters.city) locQuery.city = new RegExp(filters.city.trim(), "i");
+      if (filters.locality) locQuery.locality = new RegExp(filters.locality.trim(), "i");
+      
+      const count = await Property.countDocuments(locQuery);
+      hasProperties = count > 0;
+      
+      if (!hasProperties) {
+        availableCities = await Property.distinct("city", { status: "approved", isDeleted: { $ne: true } });
+      }
+    } catch (err) {
+      console.error("Error checking property existence in fallback:", err);
     }
-    
-    reply = `I have found matching${pTypeStr}${purpStr} in ${locName}${extraCriteria}! To narrow this down, what else would you like? For example, are you looking for specific amenities (like parking or power backup) or nearby facilities (such as schools, colleges, or metro stations)?`;
-    suggestions = ["Close to school 🏫", "With power backup ⚡", "With parking 🚗", "Show cheaper options 💰"];
+
+    if (hasProperties) {
+      shouldSearch = true;
+      const pluralMap = {
+        "Apartment / Flat": "apartments",
+        "Villa": "villas",
+        "Independent House": "independent houses",
+        "Plot / Land": "plots",
+        "Builder Floor": "builder floors",
+        "Commercial Space": "commercial spaces"
+      };
+      const pTypeStr = filters.propertyType ? ` ${pluralMap[filters.propertyType] || filters.propertyType.toLowerCase() + 's'}` : " properties";
+      const purpStr = filters.purpose === "Buy" ? " to buy" : filters.purpose === "Rent" ? " for rent" : "";
+      
+      let extraCriteria = "";
+      if (filters.bedrooms) extraCriteria += ` (${filters.bedrooms} BHK)`;
+      if (filters.maxPrice) {
+        const priceLakhs = filters.maxPrice / 100000;
+        extraCriteria += ` under ₹${priceLakhs >= 100 ? (priceLakhs / 100).toFixed(1) + ' Cr' : priceLakhs.toFixed(0) + ' Lakhs'}`;
+      }
+      
+      reply = `I have found matching${pTypeStr}${purpStr} in ${locName}${extraCriteria}! To narrow this down, what else would you like? For example, are you looking for specific amenities (like parking or power backup) or nearby facilities (such as schools, colleges, or metro stations)?`;
+      suggestions = ["Close to school 🏫", "With power backup ⚡", "With parking 🚗", "Show cheaper options 💰"];
+    } else {
+      shouldSearch = false;
+      const citiesStr = availableCities.filter(Boolean).join(", ");
+      reply = `I couldn't find any properties in ${locName} in our database. We currently only have listings in: ${citiesStr || "other regions"}. Would you like to check properties in one of these cities?`;
+      suggestions = availableCities.filter(Boolean).map(city => `Show ${city} properties 🏠`);
+    }
   } else {
-    reply = "Hello! I am Eyva, your real estate assistant. I'm connected to the EstateGold properties database. Could you please specify the city or locality you are looking for?";
-    suggestions = ["Show Coimbatore properties 🏠", "Show Chennai properties 🏠", "Show Bengaluru properties 🏠"];
+    // User did not specify location yet, but might have specified other filters (property type, purpose, beds, price)
+    let hasCriteria = Boolean(filters.purpose || filters.bedrooms || filters.propertyType || filters.maxPrice);
+
+    if (hasCriteria) {
+      let criteriaStr = "";
+      const verb = filters.purpose === "Rent" ? "rent" : filters.purpose === "Buy" ? "buy" : "";
+      const pType = filters.propertyType ? filters.propertyType : "property";
+      const bhk = filters.bedrooms ? `${filters.bedrooms} BHK` : "";
+      
+      if (verb && bhk) {
+        criteriaStr = `to ${verb} a ${bhk} ${pType}`;
+      } else if (verb) {
+        criteriaStr = `to ${verb} a ${pType}`;
+      } else if (bhk) {
+        criteriaStr = `for a ${bhk} ${pType}`;
+      } else {
+        criteriaStr = `for a ${pType}`;
+      }
+      if (filters.maxPrice) {
+        const priceLakhs = filters.maxPrice / 100000;
+        criteriaStr += ` under ₹${priceLakhs >= 100 ? (priceLakhs / 100).toFixed(1) + ' Cr' : priceLakhs.toFixed(0) + ' Lakhs'}`;
+      }
+
+      reply = `I've noted that you are looking ${criteriaStr}! Could you please specify the city or locality you are looking in?`;
+      
+      // Get active cities from database for dynamic suggestions
+      let availableCities = [];
+      try {
+        const Property = require("../models/Property");
+        availableCities = await Property.distinct("city", { status: "approved", isDeleted: { $ne: true } });
+      } catch (err) {
+        console.error("Error fetching cities for suggestions:", err);
+      }
+      suggestions = availableCities.filter(Boolean).slice(0, 3).map(city => `In ${city} 🏠`);
+      if (suggestions.length === 0) {
+        suggestions = ["Show Coimbatore properties 🏠", "Show Chennai properties 🏠", "Show Bengaluru properties 🏠"];
+      }
+    } else {
+      reply = "Hello! I am Eyva, your real estate assistant. I'm connected to the EstateGold properties database. Could you please specify the city or locality you are looking for?";
+      suggestions = ["Show Coimbatore properties 🏠", "Show Chennai properties 🏠", "Show Bengaluru properties 🏠"];
+    }
   }
 
   return {
