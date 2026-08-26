@@ -85,7 +85,8 @@ const calculatePropertyMatchScore = (property, preferences = {}, weights = DEFAU
   }
 
   // 4. Locality
-  if (preferences.locality && cleanStr(preferences.locality)) {
+  const isLocSameAsCity = preferences.city && preferences.locality && cleanStr(preferences.city) === cleanStr(preferences.locality);
+  if (preferences.locality && cleanStr(preferences.locality) && !isLocSameAsCity) {
     const prefLocality = cleanStr(preferences.locality);
     const propLocality = cleanStr(property.locality);
 
