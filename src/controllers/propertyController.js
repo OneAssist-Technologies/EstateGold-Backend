@@ -1519,15 +1519,31 @@ exports.getSimilarProperties = async (req, res) => {
       });
     }
 
-    const similar = await Property.find({
+    // Strictly filter out draft, rejected, unapproved, or price=0 properties
+    const baseFilter = {
       _id: { $ne: id },
+      status: { $in: ["approved", "active", "published"] },
+      isDraft: { $ne: true },
+      price: { $gt: 0 },
+    };
+
+    let similar = await Property.find({
+      ...baseFilter,
       $or: [
         { city: currentProperty.city },
+        { locality: currentProperty.locality },
         { propertyType: currentProperty.propertyType },
       ],
     })
       .limit(4)
       .sort({ createdAt: -1 });
+
+    // Fallback: If no similar in city/type, get other published active listings
+    if (similar.length === 0) {
+      similar = await Property.find(baseFilter)
+        .limit(4)
+        .sort({ createdAt: -1 });
+    }
 
     return res.status(200).json({
       success: true,
