@@ -8,6 +8,7 @@ const connectDB = require("./config/db");
 const seedAdmin = require("./seed/createAdmin");
 const requestLogger = require("./middleware/requestLogger");
 const createHealthRouter = require("./src/routes/healthRoutes");
+const v1Routes = require("./src/routes/v1");
 
 const authRoutes = require("./src/routes/authRoutes");
 const propertyRoutes = require("./src/routes/propertyRoutes");
@@ -42,13 +43,17 @@ app.use(
   express.static(path.join(__dirname, "../uploads"))
 );
 
-// Health & Debug Routes (register early so they always work)
+// ═══════ API v1 Routes (new versioned API) ═══════
+app.use("/api/v1", v1Routes);
+app.use("/api/v1/health", createHealthRouter(app));
+
+// ═══════ Legacy Routes (kept for backward compatibility) ═══════
+// TODO: Remove these after all frontend calls migrate to /api/v1
 app.use("/api/health", createHealthRouter(app));
 
 app.use("/api/admin/locations", locationRoutes);
 app.use("/api/admin", adminRoutes);
  
-// Routes
 app.use("/api/auth", authRoutes);
 app.use("/api", authRoutes);
 app.use("/api", propertyRoutes);
