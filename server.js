@@ -53,7 +53,7 @@ app.use("/api/health", createHealthRouter(app));
 
 app.use("/api/admin/locations", locationRoutes);
 app.use("/api/admin", adminRoutes);
- 
+
 app.use("/api/auth", authRoutes);
 app.use("/api", authRoutes);
 app.use("/api", propertyRoutes);
@@ -61,7 +61,7 @@ app.use("/api", enquiryRoutes);
 app.use("/api/locations", locationRoutes);
 app.use("/api/market-insight", marketInsightRoutes);
 app.use("/api/ai", aiRoutes);
- 
+
 // Health Check
 app.get(["/", "/api"], (req, res) => {
   res.status(200).json({

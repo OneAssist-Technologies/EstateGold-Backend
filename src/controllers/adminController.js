@@ -94,25 +94,23 @@ exports.getDashboard = async (req, res) => {
 
 exports.getProperties = async (req, res) => {
   try {
-
-    const page =
-      Number(req.query.page) || 1;
-
-    const limit =
-      Number(req.query.limit) || 10;
-
-    const skip =
-      (page - 1) * limit;
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
     const filter = {
       isDeleted: false,
+      status: { $ne: "draft" },
+      isDraft: { $ne: true },
     };
 
     if (req.query.status) {
       if (req.query.status === "delete_requests") {
         filter.deleteRequested = true;
-      } else {
+      } else if (req.query.status !== "all") {
         filter.status = req.query.status;
+        filter.deleteRequested = { $ne: true };
+      } else {
         filter.deleteRequested = { $ne: true };
       }
     } else {
@@ -120,57 +118,28 @@ exports.getProperties = async (req, res) => {
     }
 
     if (req.query.type) {
-      filter.propertyType =
-        req.query.type;
+      filter.propertyType = req.query.type;
     }
 
     if (req.query.city) {
-      filter.city =
-        req.query.city;
+      filter.city = req.query.city;
     }
 
     if (req.query.search) {
       filter.$or = [
-        {
-          ownerName: {
-            $regex:
-              req.query.search,
-            $options: "i",
-          },
-        },
-        {
-          city: {
-            $regex:
-              req.query.search,
-            $options: "i",
-          },
-        },
-        {
-          locality: {
-            $regex:
-              req.query.search,
-            $options: "i",
-          },
-        },
+        { ownerName: { $regex: req.query.search, $options: "i" } },
+        { city: { $regex: req.query.search, $options: "i" } },
+        { locality: { $regex: req.query.search, $options: "i" } },
       ];
     }
 
-    const total =
-      await Property.countDocuments(
-        filter
-      );
+    const total = await Property.countDocuments(filter);
 
-    const properties =
-      await Property.find(filter)
-        .populate(
-          "createdBy",
-          "fullName email phone role agencyName"
-        )
-        .sort({
-          createdAt: -1,
-        })
-        .skip(skip)
-        .limit(limit);
+    const properties = await Property.find(filter)
+      .populate("createdBy", "fullName email phone role agencyName")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
     const baseUrl = `${req.protocol}://${req.get("host")}`;
 
@@ -185,11 +154,11 @@ exports.getProperties = async (req, res) => {
       return p;
     });
 
-    const totalCount = await Property.countDocuments({ isDeleted: false, deleteRequested: { $ne: true } });
+    const totalCount = await Property.countDocuments({ isDeleted: false, status: { $ne: "draft" }, isDraft: { $ne: true }, deleteRequested: { $ne: true } });
     const pendingCount = await Property.countDocuments({ isDeleted: false, status: "pending", deleteRequested: { $ne: true } });
     const approvedCount = await Property.countDocuments({ isDeleted: false, status: "approved", deleteRequested: { $ne: true } });
     const rejectedCount = await Property.countDocuments({ isDeleted: false, status: "rejected", deleteRequested: { $ne: true } });
-    const deleteRequestsCount = await Property.countDocuments({ isDeleted: false, deleteRequested: true });
+    const deleteRequestsCount = await Property.countDocuments({ isDeleted: false, status: { $ne: "draft" }, deleteRequested: true });
 
     res.json({
       success: true,
@@ -440,9 +409,12 @@ exports.getUsers = async (req, res) => {
     const filter = {};
 
     if (role && role !== "all") {
-      // Normalize 'buyers' -> 'buyer', 'sellers' -> 'seller', 'agents' -> 'agent'
       const normalizedRole = role.toLowerCase().replace(/s$/, "");
-      filter.role = normalizedRole;
+      if (["member", "buyer", "seller"].includes(normalizedRole)) {
+        filter.role = { $in: ["member", "seller", "buyer", "user"] };
+      } else {
+        filter.role = normalizedRole;
+      }
     }
 
     if (search) {
@@ -461,6 +433,10 @@ exports.getUsers = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limit));
+
+    const memberFilter = { role: { $in: ["member", "seller", "buyer", "user"] } };
+    const totalMembers = await User.countDocuments(memberFilter);
+    const verifiedMembers = await User.countDocuments({ ...memberFilter, isVerified: true });
 
     const totalBuyers = await User.countDocuments({ role: "buyer" });
     const verifiedBuyers = await User.countDocuments({ role: "buyer", isVerified: true });
@@ -481,6 +457,8 @@ exports.getUsers = async (req, res) => {
       pages: Math.ceil(total / Number(limit)),
       users,
       stats: {
+        totalMembers,
+        verifiedMembers,
         totalBuyers,
         verifiedBuyers,
         totalSellers,
@@ -677,38 +655,52 @@ exports.getAnalytics = async (req, res) => {
     // 2. Property Listing Trends (Line/Area Chart - timeline generated across entire range)
     const trendProperties = await Property.find({
       createdAt: { $gte: startDate, $lte: endDate },
-    }).select("createdAt status purpose isDeleted");
+    }).select("createdAt status availabilityStatus purpose isDeleted deleteRequested");
 
-    const daysDiff = Math.ceil(durationMs / (24 * 60 * 60 * 1000));
-    const stepDays = daysDiff > 90 ? 30 : daysDiff > 14 ? 5 : 1;
     const trendMap = new Map();
-
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + stepDays)) {
-      const dateLabel = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      trendMap.set(dateLabel, { date: dateLabel, added: 0, sold: 0, rented: 0, removed: 0 });
+    // Build map for every single day in the period in strict chronological order
+    const currDate = new Date(startDate);
+    while (currDate <= endDate) {
+      const dateLabel = currDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      if (!trendMap.has(dateLabel)) {
+        trendMap.set(dateLabel, { date: dateLabel, added: 0, sold: 0, rented: 0, removed: 0 });
+      }
+      currDate.setDate(currDate.getDate() + 1);
     }
 
     trendProperties.forEach((p) => {
+      // Exclude incomplete work-in-progress draft listings
+      if (p.status === "draft") return;
+
       const label = new Date(p.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
       let entry = trendMap.get(label);
       if (!entry) {
-        entry = { date: label, added: 0, sold: 0, rented: 0, removed: 0 };
-        trendMap.set(label, entry);
+        entry = Array.from(trendMap.values())[0];
       }
-      if (p.isDeleted || p.status === "rejected") {
+
+      if (p.isDeleted || p.status === "rejected" || p.deleteRequested) {
         entry.removed++;
       } else {
         entry.added++;
         const purposeLower = (p.purpose || "").toLowerCase();
-        if (purposeLower.includes("rent") || purposeLower.includes("lease")) {
-          entry.rented++;
-        } else {
-          entry.sold++;
+        const isRent = purposeLower.includes("rent") || purposeLower.includes("lease");
+
+        if (p.availabilityStatus === "sold" || p.availabilityStatus === "hold") {
+          if (isRent) {
+            entry.rented++;
+          } else {
+            entry.sold++;
+          }
         }
       }
     });
 
-    const listingTrends = Array.from(trendMap.values());
+    let listingTrends = Array.from(trendMap.values());
+    // If range is large (> 12 data points), sample evenly while preserving chronological order
+    if (listingTrends.length > 12) {
+      const step = Math.ceil(listingTrends.length / 10);
+      listingTrends = listingTrends.filter((_, idx) => idx % step === 0 || idx === listingTrends.length - 1);
+    }
 
     // 3. Properties by Type (Overall Portfolio Breakdown)
     const typeAgg = await Property.aggregate([
