@@ -39,19 +39,20 @@ app.use(
   express.static(path.join(__dirname, "../uploads"))
 );
 
-app.use("/admin/locations", locationRoutes);
-app.use("/admin", adminRoutes);
-
+app.use("/api/admin/locations", locationRoutes);
+app.use("/api/admin", adminRoutes);
+ 
 // Routes
-app.use(authRoutes);
-app.use(propertyRoutes);
-app.use(enquiryRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api", authRoutes);
+app.use("/api", propertyRoutes);
+app.use("/api", enquiryRoutes);
 app.use("/api/locations", locationRoutes);
-app.use("/market-insight", marketInsightRoutes);
+app.use("/api/market-insight", marketInsightRoutes);
 app.use("/api/ai", aiRoutes);
-
+ 
 // Health Check
-app.get("/", (req, res) => {
+app.get(["/", "/api"], (req, res) => {
   res.status(200).json({
     success: true,
     message:
