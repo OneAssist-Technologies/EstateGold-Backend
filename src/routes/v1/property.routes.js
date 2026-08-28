@@ -76,7 +76,7 @@ router.patch("/:id/approve", approveProperty);
 router.patch("/:id/reject", rejectProperty);
 
 // PATCH /api/v1/properties/:id/status — Update status
-router.patch("/:id/status", updatePropertyStatus);
+router.patch("/:id/status", auth, updatePropertyStatus);
 
 // PATCH /api/v1/properties/:id/request-delete — Request deletion
 router.patch("/:id/request-delete", auth, requestDelete);

@@ -21,6 +21,9 @@ router.get("/property-highlights/:id", aiController.getPropertyHighlights);
 // POST /api/v1/ai/parse-search — Parse natural language search
 router.post("/parse-search", aiController.parseSearch);
 
+// POST /api/v1/ai/property-tips — Eyva's Property Publish Tips
+router.post("/property-tips", aiController.getPropertyTips);
+
 // POST /api/v1/ai/eyva — Eyva AI chat
 router.post("/eyva", aiController.eyvaChat);
 

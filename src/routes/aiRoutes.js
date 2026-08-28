@@ -10,6 +10,7 @@ router.get("/compare-properties", aiController.compareProperties);
 router.get("/property-health/:id", aiController.getPropertyHealth);
 router.get("/property-highlights/:id", aiController.getPropertyHighlights);
 router.post("/parse-search", aiController.parseSearch);
+router.post("/property-tips", aiController.getPropertyTips);
 router.post("/eyva", aiController.eyvaChat);
 
 module.exports = router;
