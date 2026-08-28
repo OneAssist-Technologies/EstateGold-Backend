@@ -308,7 +308,7 @@ const propertySchema =
 
       availabilityStatus: {
         type: String,
-        enum: ["on_sale", "hold", "sold"],
+        enum: ["on_sale", "hold", "sold", "rented"],
         default: "on_sale",
       },
 

@@ -1804,3 +1804,58 @@ exports.deletePropertyDraft = async (req, res) => {
     });
   }
 };
+
+exports.updatePropertyStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const requestedStatus = req.body.availabilityStatus || req.body.status;
+    const allowedStatuses = ["on_sale", "hold", "sold", "rented"];
+
+    if (!requestedStatus || !allowedStatuses.includes(requestedStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid status value. Allowed values: on_sale, hold, sold, rented",
+      });
+    }
+
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        message: "Property not found",
+      });
+    }
+
+    const userId = (req.user?._id || req.user?.id || "").toString();
+    const createdBy = (property.createdBy || "").toString();
+    const ownerId = (property.ownerId || "").toString();
+    const isAdmin = req.user?.role === "admin";
+
+    if (!isAdmin && userId !== createdBy && userId !== ownerId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are only authorized to change the status of properties you own.",
+      });
+    }
+
+    property.availabilityStatus = requestedStatus;
+    await property.save();
+
+    let displayStatus = "On Sale";
+    if (requestedStatus === "hold") displayStatus = "On Hold";
+    if (requestedStatus === "sold") displayStatus = "Sold";
+    if (requestedStatus === "rented") displayStatus = "Rented";
+
+    return res.status(200).json({
+      success: true,
+      message: `Property status updated to ${displayStatus}.`,
+      data: property,
+    });
+  } catch (err) {
+    console.error("Error in updatePropertyStatus:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Failed to update property status",
+    });
+  }
+};
