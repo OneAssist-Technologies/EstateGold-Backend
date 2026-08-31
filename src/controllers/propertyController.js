@@ -116,7 +116,7 @@ const cleanPropertyDetails = (propertyType, body) => {
     "longitude", "serviceableAreaId", "price", "description", "availableFrom", "photos",
     "neighbourhood", "status", "availabilityStatus", "role", "createdBy", "ownerNegotiable",
     "ownerReadyToMeet", "marketInsight", "amenities", "facing", "pendingIssues", "documents",
-    "ownershipType", "numberOfOwners", "pan"
+    "ownershipType", "numberOfOwners", "pan", "agreementDetails"
   ];
 
   let allowedTypeFields = [];
@@ -332,6 +332,15 @@ exports.createProperty =
           }
         } catch (err) {
           console.error("Failed to parse documents:", err);
+        }
+      }
+      if (req.body.agreementDetails) {
+        try {
+          if (typeof req.body.agreementDetails === "string") {
+            req.body.agreementDetails = JSON.parse(req.body.agreementDetails);
+          }
+        } catch (err) {
+          console.error("Failed to parse agreementDetails:", err);
         }
       }
 
@@ -1204,6 +1213,15 @@ exports.updateProperty = async (req, res) => {
         console.error("Failed to parse documents:", err);
       }
     }
+    if (req.body.agreementDetails) {
+      try {
+        if (typeof req.body.agreementDetails === "string") {
+          req.body.agreementDetails = JSON.parse(req.body.agreementDetails);
+        }
+      } catch (err) {
+        console.error("Failed to parse agreementDetails:", err);
+      }
+    }
 
     const cleanedData = cleanPropertyDetails(req.body.propertyType || property.propertyType, req.body);
 
@@ -1726,6 +1744,9 @@ exports.updatePropertyDraft = async (req, res) => {
     if (req.body.documents && typeof req.body.documents === "string") {
       try { req.body.documents = JSON.parse(req.body.documents); } catch (e) { }
     }
+    if (req.body.agreementDetails && typeof req.body.agreementDetails === "string") {
+      try { req.body.agreementDetails = JSON.parse(req.body.agreementDetails); } catch (e) { }
+    }
     if (req.body.marketInsight && typeof req.body.marketInsight === "string") {
       try { req.body.marketInsight = JSON.parse(req.body.marketInsight); } catch (e) { }
     }
@@ -1740,6 +1761,7 @@ exports.updatePropertyDraft = async (req, res) => {
     if (req.body.neighbourhood) draft.neighbourhood = req.body.neighbourhood;
     if (req.body.pendingIssues) draft.pendingIssues = req.body.pendingIssues;
     if (req.body.documents) draft.documents = req.body.documents;
+    if (req.body.agreementDetails) draft.agreementDetails = req.body.agreementDetails;
     if (req.body.marketInsight) draft.marketInsight = req.body.marketInsight;
 
     await draft.save();

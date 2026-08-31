@@ -25,6 +25,13 @@ const {
   deletePropertyDraft,
 } = require("../controllers/propertyController");
 
+const {
+  downloadTemplate,
+  validateBulkUpload,
+  publishBulkProperties,
+  downloadErrorReport,
+} = require("../controllers/bulkPropertyController");
+
 const upload=
   require(
     "../../middleware/upload"
@@ -36,6 +43,16 @@ const upload=
 
 const router =
   express.Router();
+
+// Bulk Upload Endpoints
+router.get("/bulk-upload/template", downloadTemplate);
+router.get("/api/properties/bulk-upload/template", downloadTemplate);
+router.post("/bulk-upload/validate", auth, upload.single("file"), validateBulkUpload);
+router.post("/api/properties/bulk-upload/validate", auth, upload.single("file"), validateBulkUpload);
+router.post("/bulk-upload/publish", auth, publishBulkProperties);
+router.post("/api/properties/bulk-upload/publish", auth, publishBulkProperties);
+router.post("/bulk-upload/error-report", auth, downloadErrorReport);
+router.post("/api/properties/bulk-upload/error-report", auth, downloadErrorReport);
 
 router.get("/settings", getPublicSettings);
 router.get("/api/settings", getPublicSettings);
@@ -141,6 +158,8 @@ router.get(
   auth,
   getMyProperties
 );
+router.get("/properties/mine", auth, getMyProperties);
+router.get("/properties/mine/:userId", auth, getMyProperties);
 
 router.get(
   "/search-properties",
