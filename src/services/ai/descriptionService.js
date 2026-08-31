@@ -6,8 +6,21 @@ const generateFallbackDescription = (p) => {
   const locationStr = targetLocality ? `in ${targetLocality}` : '';
   const priceStr = p.price ? `INR ${p.price.toLocaleString('en-IN')}` : 'Contact Owner';
   const typeLabel = p.propertyType || 'Property';
-  const purposeLabel = p.purpose === 'Rent' ? 'Rent' : 'Sale';
   
+  let purposeLabel = 'Sale';
+  if (p.purpose) {
+    const raw = String(p.purpose).trim().toLowerCase();
+    if (raw === 'lease') {
+      purposeLabel = 'Lease';
+    } else if (raw === 'rent') {
+      purposeLabel = 'Rent';
+    } else if (raw === 'sale' || raw === 'buy') {
+      purposeLabel = 'Sale';
+    } else {
+      purposeLabel = p.purpose.charAt(0).toUpperCase() + p.purpose.slice(1);
+    }
+  }
+
   // Title generation
   const title = `${p.bedrooms ? p.bedrooms + ' BHK ' : ''}${typeLabel} for ${purposeLabel} ${locationStr}`.trim();
   

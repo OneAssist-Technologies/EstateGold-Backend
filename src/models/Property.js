@@ -409,7 +409,23 @@ const propertySchema =
           remarks: String,
           expiryDate: Date,
         }
-      ]
+      ],
+      agreementDetails: {
+        agreementType: { type: String, default: "" },
+        amount: { type: Number, default: 0 },
+        advanceAmount: { type: Number, default: 0 },
+        securityDeposit: { type: Number, default: 0 },
+        duration: { type: String, default: "" },
+        startDate: { type: Date, default: null },
+        noticePeriod: { type: String, default: "" },
+        lockInPeriod: { type: String, default: "" },
+        rentEscalation: { type: String, default: "" },
+        maintenanceResponsibility: { type: String, default: "" },
+        utilitiesResponsibility: { type: String, default: "" },
+        parkingDetails: { type: String, default: "" },
+        furnishingCondition: { type: String, default: "" },
+        additionalTerms: { type: String, default: "" },
+      }
     },
     {
       timestamps: true,

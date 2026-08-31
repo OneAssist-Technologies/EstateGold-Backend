@@ -25,8 +25,21 @@ const {
   getPublicSettings,
 } = require("../../controllers/propertyController");
 
+const {
+  downloadTemplate,
+  validateBulkUpload,
+  publishBulkProperties,
+  downloadErrorReport,
+} = require("../../controllers/bulkPropertyController");
+
 const auth = require("../../../middleware/authMiddleware");
 const upload = require("../../../middleware/upload");
+
+// ─── Bulk Upload Routes ───
+router.get("/bulk-upload/template", downloadTemplate);
+router.post("/bulk-upload/validate", auth, upload.single("file"), validateBulkUpload);
+router.post("/bulk-upload/publish", auth, publishBulkProperties);
+router.post("/bulk-upload/error-report", auth, downloadErrorReport);
 
 // ─── Public property routes ───
 
