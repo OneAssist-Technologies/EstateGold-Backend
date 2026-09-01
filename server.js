@@ -129,3 +129,4 @@ app.listen(PORT, () => {
   console.log(`🩺 Health check: http://localhost:${PORT}/api/health`);
   console.log(`🗺️  Route map:    http://localhost:${PORT}/api/health/routes`);
 });
+// Updated routes for New Projects API

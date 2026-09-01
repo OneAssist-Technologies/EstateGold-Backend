@@ -6,6 +6,7 @@ const router = express.Router();
 const {
   createProperty,
   getProperties,
+  getNewProjects,
   getPropertiesCompare,
   getPropertyById,
   getSimilarProperties,
@@ -45,6 +46,9 @@ router.post("/bulk-upload/error-report", auth, downloadErrorReport);
 
 // GET /api/v1/properties — List properties (with query filters)
 router.get("/", getProperties);
+
+// GET /api/v1/properties/new-projects — List new projects
+router.get("/new-projects", getNewProjects);
 
 // GET /api/v1/properties/compare — Compare properties
 router.get("/compare", getPropertiesCompare);
