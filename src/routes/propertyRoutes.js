@@ -5,6 +5,7 @@ const fs = require("fs");
 const {
   createProperty,
   getProperties,
+  getNewProjects,
   getPropertiesCompare,
   getPropertyById,
   getSimilarProperties,
@@ -53,6 +54,9 @@ router.post("/bulk-upload/publish", auth, publishBulkProperties);
 router.post("/api/properties/bulk-upload/publish", auth, publishBulkProperties);
 router.post("/bulk-upload/error-report", auth, downloadErrorReport);
 router.post("/api/properties/bulk-upload/error-report", auth, downloadErrorReport);
+
+router.get("/new-projects", getNewProjects);
+router.get("/properties/new-projects", getNewProjects);
 
 router.get("/settings", getPublicSettings);
 router.get("/api/settings", getPublicSettings);

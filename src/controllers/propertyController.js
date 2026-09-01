@@ -1881,3 +1881,159 @@ exports.updatePropertyStatus = async (req, res) => {
     });
   }
 };
+
+exports.getNewProjects = async (req, res) => {
+  try {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 12;
+    const skip = (page - 1) * limit;
+
+    const {
+      search,
+      purpose,
+      city,
+      locality,
+      propertyType,
+      bedrooms,
+      minPrice,
+      maxPrice,
+      constructionStatus,
+      sort,
+    } = req.query;
+
+    // Base query for public eligible new project properties
+    // Primary eligibility:
+    // 1. Construction Status = Under Construction / New Launch / Near Completion
+    // OR 2. Property Age <= 1 Year (e.g. 0-1 Year Old)
+    // Strictly excludes properties with Property Age > 1 Year (1-5 Years, 5-10 Years, 10+ Years).
+    const query = {
+      isDeleted: { $ne: true },
+      status: { $in: ["approved", "active", "published"] },
+      availabilityStatus: { $ne: "sold" },
+      $and: [
+        {
+          $or: [
+            { constructionStatus: { $regex: /under construction|new launch|near completion/i } },
+            { propertyAge: { $regex: /0-1|0|1|under 1|new|less than 1/i } }
+          ]
+        },
+        {
+          propertyAge: { $not: /1-5|5-10|10\+|1-3|3-5|older|resale/i }
+        }
+      ]
+    };
+
+    // Purpose filter (supports Sale, Rent, Lease)
+    if (purpose && purpose.trim() !== "") {
+      const purpTrim = purpose.trim().toLowerCase();
+      if (purpTrim === "rent" || purpTrim === "for rent" || purpTrim === "lease") {
+        query.purpose = { $regex: /rent|lease/i };
+      } else if (purpTrim === "buy" || purpTrim === "sale" || purpTrim === "sell" || purpTrim === "for sale") {
+        query.purpose = { $regex: /buy|sale|sell/i };
+      } else {
+        query.purpose = { $regex: new RegExp(purpose.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+      }
+    }
+
+    // City
+    if (city && city.trim() !== "") {
+      query.city = { $regex: new RegExp(city.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+    }
+
+    // Locality
+    if (locality && locality.trim() !== "") {
+      query.locality = { $regex: new RegExp(locality.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+    }
+
+    // Property Type
+    if (propertyType && propertyType.trim() !== "") {
+      const pType = propertyType.trim();
+      if (/apartment|flat/i.test(pType)) {
+        query.propertyType = { $regex: /apartment|flat/i };
+      } else if (/house|independent/i.test(pType)) {
+        query.propertyType = { $regex: /house|independent/i };
+      } else if (/plot|land/i.test(pType)) {
+        query.propertyType = { $regex: /plot|land/i };
+      } else if (/commercial/i.test(pType)) {
+        query.propertyType = { $regex: /commercial/i };
+      } else if (/villa/i.test(pType)) {
+        query.propertyType = { $regex: /villa/i };
+      } else {
+        query.propertyType = { $regex: new RegExp(pType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+      }
+    }
+
+    // Bedrooms
+    if (bedrooms && bedrooms.trim() !== "") {
+      const bNum = Number(bedrooms);
+      if (bNum >= 5) {
+        query.bedrooms = { $gte: 5 };
+      } else if (!isNaN(bNum) && bNum > 0) {
+        query.bedrooms = bNum;
+      }
+    }
+
+    // Construction Status filter override
+    if (constructionStatus && constructionStatus.trim() !== "") {
+      query.constructionStatus = { $regex: new RegExp(constructionStatus.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+    }
+
+    // Price Filter
+    if (minPrice || maxPrice) {
+      query.price = {};
+      if (minPrice && !isNaN(Number(minPrice))) {
+        query.price.$gte = Number(minPrice);
+      }
+      if (maxPrice && !isNaN(Number(maxPrice))) {
+        query.price.$lte = Number(maxPrice);
+      }
+    }
+
+    // Search query
+    if (search && search.trim() !== "") {
+      const cleanSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      query.$or = [
+        { city: { $regex: cleanSearch, $options: "i" } },
+        { locality: { $regex: cleanSearch, $options: "i" } },
+        { society: { $regex: cleanSearch, $options: "i" } },
+        { address: { $regex: cleanSearch, $options: "i" } },
+        { propertyType: { $regex: cleanSearch, $options: "i" } },
+        { projectName: { $regex: cleanSearch, $options: "i" } },
+      ];
+    }
+
+    // Sorting
+    let sortOption = { createdAt: -1 };
+    if (sort === "priceLowToHigh") sortOption = { price: 1 };
+    if (sort === "priceHighToLow") sortOption = { price: -1 };
+    if (sort === "oldest") sortOption = { createdAt: 1 };
+
+    const totalProperties = await Property.countDocuments(query);
+    const docs = await Property.find(query)
+      .populate("createdBy", "fullName email phone role agencyName")
+      .sort(sortOption)
+      .skip(skip)
+      .limit(limit);
+
+    const properties = docs.map((p) => sanitizePropertyData(p.toObject(), req));
+
+    return res.status(200).json({
+      success: true,
+      data: properties,
+      pagination: {
+        page,
+        limit,
+        totalProperties,
+        totalPages: Math.ceil(totalProperties / limit) || 1,
+        hasNext: page < Math.ceil(totalProperties / limit),
+        hasPrevious: page > 1,
+      },
+    });
+  } catch (err) {
+    console.error("Error in getNewProjects:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Failed to fetch new projects",
+    });
+  }
+};

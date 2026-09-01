@@ -87,6 +87,9 @@ const generateBulkTemplate = () => {
       "Lock-in Period": "6 Months",
       "Rent Escalation": "5% per annum",
       "Photos (URLs comma-separated)": "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2",
+      "Document URLs (comma-separated)": "https://example.com/docs/sale_deed_ramakrishnan.pdf, https://example.com/docs/tax_receipt_2026.pdf",
+      "Sale Deed URL": "https://example.com/docs/sale_deed_ramakrishnan.pdf",
+      "Property Tax Receipt URL": "https://example.com/docs/tax_receipt_2026.pdf",
     },
     {
       "Owner Name": "Suresh Kumar",
@@ -125,6 +128,9 @@ const generateBulkTemplate = () => {
       "Lock-in Period": "",
       "Rent Escalation": "",
       "Photos (URLs comma-separated)": "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9",
+      "Document URLs (comma-separated)": "https://example.com/docs/villa_sale_deed.pdf, https://example.com/docs/ec_certificate.pdf",
+      "Sale Deed URL": "https://example.com/docs/villa_sale_deed.pdf",
+      "Property Tax Receipt URL": "https://example.com/docs/tax_receipt_villa.pdf",
     },
     {
       "Owner Name": "Anand Vardhan",
@@ -163,6 +169,9 @@ const generateBulkTemplate = () => {
       "Lock-in Period": "1 Year",
       "Rent Escalation": "10% every 3 years",
       "Photos (URLs comma-separated)": "https://images.unsplash.com/photo-1497366216548-37526070297c",
+      "Document URLs (comma-separated)": "https://example.com/docs/commercial_deed.pdf, https://example.com/docs/building_plan.pdf",
+      "Sale Deed URL": "https://example.com/docs/commercial_deed.pdf",
+      "Property Tax Receipt URL": "https://example.com/docs/commercial_tax.pdf",
     },
   ];
 
@@ -284,6 +293,78 @@ const validateBulkProperties = async (rawRows, publisherDetails = {}) => {
       ? photosRaw.split(",").map((s) => s.trim()).filter(Boolean)
       : [];
 
+    // Extract Property Documents (Flexible header keys)
+    const docsRaw = getVal(row, [
+      "Document URLs (comma-separated)",
+      "Document URLs",
+      "Documents (URLs comma-separated)",
+      "Documents",
+      "Document Links",
+      "Property Documents",
+      "Ownership Documents",
+      "Verification Documents",
+    ]);
+
+    const saleDeedUrl = getVal(row, ["Sale Deed URL", "Sale Deed Link", "Sale Deed", "Title Deed URL", "Title Deed"]);
+    const taxReceiptUrl = getVal(row, ["Tax Receipt URL", "Property Tax Receipt URL", "Property Tax Receipt", "Tax Receipt"]);
+    const ecUrl = getVal(row, ["Encumbrance Certificate URL", "EC URL", "Encumbrance Certificate"]);
+    const buildingPlanUrl = getVal(row, ["Building Plan URL", "Approved Building Plan URL", "Building Plan"]);
+
+    const uploadedDocuments = [];
+
+    if (docsRaw) {
+      const urls = docsRaw.split(",").map((s) => s.trim()).filter(Boolean);
+      urls.forEach((url, idx) => {
+        uploadedDocuments.push({
+          documentType: idx === 0 ? "sale_deed" : idx === 1 ? "tax_receipt" : "property_document",
+          fileUrl: url,
+          fileName: `Property_Document_${idx + 1}.pdf`,
+          verificationStatus: "Uploaded",
+          uploadedAt: new Date(),
+        });
+      });
+    }
+
+    if (saleDeedUrl && !uploadedDocuments.some((d) => d.fileUrl === saleDeedUrl)) {
+      uploadedDocuments.push({
+        documentType: "sale_deed",
+        fileUrl: saleDeedUrl,
+        fileName: "Sale_Deed.pdf",
+        verificationStatus: "Uploaded",
+        uploadedAt: new Date(),
+      });
+    }
+
+    if (taxReceiptUrl && !uploadedDocuments.some((d) => d.fileUrl === taxReceiptUrl)) {
+      uploadedDocuments.push({
+        documentType: "tax_receipt",
+        fileUrl: taxReceiptUrl,
+        fileName: "Property_Tax_Receipt.pdf",
+        verificationStatus: "Uploaded",
+        uploadedAt: new Date(),
+      });
+    }
+
+    if (ecUrl && !uploadedDocuments.some((d) => d.fileUrl === ecUrl)) {
+      uploadedDocuments.push({
+        documentType: "encumbrance_certificate",
+        fileUrl: ecUrl,
+        fileName: "Encumbrance_Certificate.pdf",
+        verificationStatus: "Uploaded",
+        uploadedAt: new Date(),
+      });
+    }
+
+    if (buildingPlanUrl && !uploadedDocuments.some((d) => d.fileUrl === buildingPlanUrl)) {
+      uploadedDocuments.push({
+        documentType: "building_plan",
+        fileUrl: buildingPlanUrl,
+        fileName: "Approved_Building_Plan.pdf",
+        verificationStatus: "Uploaded",
+        uploadedAt: new Date(),
+      });
+    }
+
     // 1. Validate Mandatory Owner Details
     if (!ownerName) missingFields.push("Owner Name");
     if (!ownerPhone || ownerPhone.length !== 10) {
@@ -347,7 +428,15 @@ const validateBulkProperties = async (rawRows, publisherDetails = {}) => {
       if (!duration) missingFields.push("Agreement Duration");
     }
 
-    // 5. Serviceability Check (if location is provided)
+    // 5. REQUIRED PROPERTY DOCUMENT AVAILABILITY VALIDATION
+    if (uploadedDocuments.length === 0) {
+      missingFields.push("Required Property Verification Documents (Sale Deed / Title Deed / Tax Receipt / EC)");
+      errorDetails.push(
+        "Property document availability check failed: At least one required property verification document URL (e.g., Sale Deed URL, Title Deed URL, Tax Receipt URL, or Encumbrance Certificate URL) must be provided."
+      );
+    }
+
+    // 6. Serviceability Check (if location is provided)
     let serviceableAreaId = null;
     if (city && locality) {
       try {
@@ -401,6 +490,7 @@ const validateBulkProperties = async (rawRows, publisherDetails = {}) => {
         propertyAge,
         maintenance,
         photos,
+        documents: uploadedDocuments,
         serviceableAreaId,
         ...(isRentOrLease
           ? {

@@ -61,10 +61,22 @@ exports.getDashboard = async (req, res) => {
     }
 
     // Pending properties for quick approval card
-    const pendingProperties = await Property.find({ isDeleted: false, status: "pending" })
+    const pendingPropertiesDocs = await Property.find({ isDeleted: false, status: "pending" })
       .populate("createdBy", "fullName email phone role agencyName")
       .sort({ createdAt: -1 })
       .limit(5);
+
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const pendingProperties = pendingPropertiesDocs.map((prop) => {
+      const p = prop.toObject();
+      p.photos = (p.photos || []).map((photo) => {
+        if (!photo) return "";
+        if (photo.startsWith("http://") || photo.startsWith("https://")) return photo;
+        const clean = photo.replace(/^\/+/, "").replace(/^uploads\/properties\//, "").replace(/^uploads\//, "");
+        return `${baseUrl}/uploads/properties/${clean}`;
+      });
+      return p;
+    });
 
     res.json({
       success: true,
