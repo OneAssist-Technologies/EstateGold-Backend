@@ -37,9 +37,15 @@ const auth = require("../../../middleware/authMiddleware");
 const upload = require("../../../middleware/upload");
 
 // ─── Bulk Upload Routes ───
+const bulkUploadMiddleware = upload.fields([
+  { name: "excelFile", maxCount: 1 },
+  { name: "zipFile", maxCount: 1 },
+  { name: "file", maxCount: 1 },
+]);
+
 router.get("/bulk-upload/template", downloadTemplate);
-router.post("/bulk-upload/validate", auth, upload.single("file"), validateBulkUpload);
-router.post("/bulk-upload/publish", auth, publishBulkProperties);
+router.post("/bulk-upload/validate", auth, bulkUploadMiddleware, validateBulkUpload);
+router.post("/bulk-upload/publish", auth, bulkUploadMiddleware, publishBulkProperties);
 router.post("/bulk-upload/error-report", auth, downloadErrorReport);
 
 // ─── Public property routes ───
