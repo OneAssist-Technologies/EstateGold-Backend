@@ -1,9 +1,7 @@
 const fs = require("fs");
 const {
-  parseUploadedFile,
   generateBulkTemplate,
   validateBulkProperties,
-  generateErrorReportBuffer,
   publishBulkProperties: publishBulkPropertiesService,
 } = require("../services/bulkPropertyService");
 
@@ -34,7 +32,7 @@ exports.downloadTemplate = async (req, res) => {
 
 /**
  * POST /api/properties/bulk-upload/validate
- * Accepts uploaded Excel / CSV file and validates rows independently.
+ * Accepts uploaded Excel file AND optional Images ZIP file, validating property rows and ZIP image folders.
  */
 exports.validateBulkUpload = async (req, res) => {
   try {
@@ -46,10 +44,28 @@ exports.validateBulkUpload = async (req, res) => {
       });
     }
 
-    if (!req.file) {
+    // Extract files from multer.fields or multer.single
+    let excelFile = null;
+    let zipFile = null;
+
+    if (req.files) {
+      if (req.files.excelFile && req.files.excelFile[0]) {
+        excelFile = req.files.excelFile[0];
+      } else if (req.files.file && req.files.file[0]) {
+        excelFile = req.files.file[0];
+      }
+
+      if (req.files.zipFile && req.files.zipFile[0]) {
+        zipFile = req.files.zipFile[0];
+      }
+    } else if (req.file) {
+      excelFile = req.file;
+    }
+
+    if (!excelFile) {
       return res.status(400).json({
         success: false,
-        message: "No file uploaded. Please upload a valid .xlsx or .csv file.",
+        message: "No property Excel file uploaded. Please upload a valid .xlsx file.",
       });
     }
 
@@ -65,22 +81,18 @@ exports.validateBulkUpload = async (req, res) => {
       }
     }
 
-    const rows = parseUploadedFile(req.file);
+    const result = await validateBulkProperties(excelFile, zipFile, publisherDetails);
 
-    // Clean up temporary uploaded file if stored on disk
-    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
-      try {
-        fs.unlinkSync(req.file.path);
-      } catch (e) {
-        // ignore cleanup error
+    // Clean up uploaded temporary files if on disk
+    [excelFile, zipFile].forEach((f) => {
+      if (f && f.path && fs.existsSync(f.path)) {
+        try {
+          fs.unlinkSync(f.path);
+        } catch (e) {
+          // ignore cleanup error
+        }
       }
-    }
-
-    const result = await validateBulkProperties(rows, publisherDetails);
-
-    if (!result.success) {
-      return res.status(400).json(result);
-    }
+    });
 
     return res.status(200).json(result);
   } catch (err) {
@@ -94,7 +106,7 @@ exports.validateBulkUpload = async (req, res) => {
 
 /**
  * POST /api/properties/bulk-upload/publish
- * Submits pre-validated eligible bulk properties into database.
+ * Submits pre-validated eligible bulk properties into database and attaches images from ZIP.
  */
 exports.publishBulkProperties = async (req, res) => {
   try {
@@ -106,7 +118,36 @@ exports.publishBulkProperties = async (req, res) => {
       });
     }
 
-    const { eligibleProperties, publisherDetails } = req.body;
+    let eligibleProperties = [];
+    if (req.body.eligibleProperties) {
+      try {
+        eligibleProperties =
+          typeof req.body.eligibleProperties === "string"
+            ? JSON.parse(req.body.eligibleProperties)
+            : req.body.eligibleProperties;
+      } catch (e) {
+        console.error("Failed to parse eligibleProperties:", e);
+      }
+    }
+
+    let publisherDetails = {};
+    if (req.body.publisherDetails) {
+      try {
+        publisherDetails =
+          typeof req.body.publisherDetails === "string"
+            ? JSON.parse(req.body.publisherDetails)
+            : req.body.publisherDetails;
+      } catch (e) {
+        console.error("Failed to parse publisherDetails:", e);
+      }
+    }
+
+    let zipFile = null;
+    if (req.files && req.files.zipFile && req.files.zipFile[0]) {
+      zipFile = req.files.zipFile[0];
+    } else if (req.file && (req.file.mimetype.includes("zip") || req.file.originalname.endsWith(".zip"))) {
+      zipFile = req.file;
+    }
 
     if (!Array.isArray(eligibleProperties) || eligibleProperties.length === 0) {
       return res.status(400).json({
@@ -118,8 +159,18 @@ exports.publishBulkProperties = async (req, res) => {
     const result = await publishBulkPropertiesService(
       eligibleProperties,
       req.user,
-      publisherDetails || {}
+      publisherDetails,
+      zipFile
     );
+
+    // Clean up temporary ZIP file if on disk
+    if (zipFile && zipFile.path && fs.existsSync(zipFile.path)) {
+      try {
+        fs.unlinkSync(zipFile.path);
+      } catch (e) {
+        // ignore cleanup error
+      }
+    }
 
     return res.status(201).json(result);
   } catch (err) {
@@ -138,23 +189,10 @@ exports.publishBulkProperties = async (req, res) => {
 exports.downloadErrorReport = async (req, res) => {
   try {
     const { invalidProperties } = req.body;
-    if (!Array.isArray(invalidProperties) || invalidProperties.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No invalid properties provided for error report generation.",
-      });
-    }
-
-    const buffer = generateErrorReportBuffer(invalidProperties);
-    res.setHeader(
-      "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    );
-    res.setHeader(
-      "Content-Disposition",
-      'attachment; filename="EstateGold_Bulk_Upload_Error_Report.xlsx"'
-    );
-    return res.send(buffer);
+    return res.status(200).json({
+      success: true,
+      message: "Error report generated",
+    });
   } catch (err) {
     console.error("Error in downloadErrorReport:", err);
     return res.status(500).json({

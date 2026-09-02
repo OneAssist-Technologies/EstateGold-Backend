@@ -1,5 +1,7 @@
 const fs = require("fs");
+const path = require("path");
 const xlsx = require("xlsx");
+const AdmZip = require("adm-zip");
 const Property = require("../models/Property");
 const SystemSettings = require("../models/SystemSettings");
 const { cleanPropertyDetails } = require("../controllers/propertyController");
@@ -32,584 +34,735 @@ const parseUploadedFile = (fileInput) => {
   } else if (typeof fileInput === "string" && fs.existsSync(fileInput)) {
     workbook = xlsx.readFile(fileInput);
   } else {
-    throw new Error("Invalid or unreadable file input. Please upload a valid Excel or CSV file.");
+    throw new Error("Invalid or unreadable Excel file input.");
   }
 
   if (!workbook || !workbook.SheetNames || workbook.SheetNames.length === 0) {
     throw new Error("The uploaded file does not contain any readable sheets.");
   }
 
-  const firstSheetName = workbook.SheetNames[0];
-  const worksheet = workbook.Sheets[firstSheetName];
+  // Find sheet containing property data
+  const dataSheetName =
+    workbook.SheetNames.find((s) => s.toLowerCase().includes("property") || s.toLowerCase().includes("data")) ||
+    workbook.SheetNames[0];
+
+  const worksheet = workbook.Sheets[dataSheetName];
   const jsonRows = xlsx.utils.sheet_to_json(worksheet, { defval: "" });
   return jsonRows;
 };
 
 /**
- * Generates the standard EstateGold Bulk Property Upload Template Excel buffer.
+ * Parses uploaded Images ZIP file and maps files by folder name / property number.
+ */
+const parseImagesZip = (zipInput) => {
+  if (!zipInput) {
+    return { folderMap: {}, allFolderNames: [], totalImages: 0 };
+  }
+
+  let zip;
+  try {
+    if (zipInput.path && fs.existsSync(zipInput.path)) {
+      zip = new AdmZip(zipInput.path);
+    } else if (zipInput.buffer) {
+      zip = new AdmZip(zipInput.buffer);
+    } else if (Buffer.isBuffer(zipInput)) {
+      zip = new AdmZip(zipInput);
+    } else if (typeof zipInput === "string" && fs.existsSync(zipInput)) {
+      zip = new AdmZip(zipInput);
+    } else {
+      return { folderMap: {}, allFolderNames: [], totalImages: 0 };
+    }
+  } catch (err) {
+    console.error("Error opening ZIP archive:", err);
+    throw new Error("Failed to read Images ZIP archive. Please ensure it is a valid .zip file.");
+  }
+
+  const entries = zip.getEntries();
+  const folderMap = {};
+  const allFolderNamesSet = new Set();
+  let totalImages = 0;
+
+  entries.forEach((entry) => {
+    if (entry.isDirectory) return;
+
+    // Security: sanitize path against traversal
+    const entryPath = entry.entryName.replace(/\\/g, "/");
+    if (entryPath.includes("../") || entryPath.includes("..\\")) return;
+
+    // Ignore hidden system files like __MACOSX or .DS_Store
+    if (entryPath.includes("__MACOSX/") || entryPath.split("/").some((p) => p.startsWith("."))) {
+      return;
+    }
+
+    const parts = entryPath.split("/").filter(Boolean);
+    if (parts.length < 2) return; // Must be inside a property folder (e.g. "Property 1/image.jpg")
+
+    const folderName = parts[0];
+    const fileName = parts[parts.length - 1];
+
+    const ext = path.extname(fileName).toLowerCase();
+    if (![".jpg", ".jpeg", ".png", ".webp"].includes(ext)) return;
+
+    allFolderNamesSet.add(folderName);
+
+    // Extract Property Number from folder name (e.g., "Property 1", "Property_1", "1", "Folder 1")
+    const match = folderName.match(/(?:property|prop|folder|num|no)?[\s\-_]*(\d+)/i);
+    const propNumKey = match ? String(parseInt(match[1], 10)) : folderName.trim().toLowerCase();
+
+    if (!folderMap[propNumKey]) {
+      folderMap[propNumKey] = [];
+    }
+
+    folderMap[propNumKey].push({
+      entryName: entry.entryName,
+      fileName,
+      folderName,
+      getData: () => entry.getData(),
+    });
+
+    totalImages++;
+  });
+
+  return {
+    folderMap,
+    allFolderNames: Array.from(allFolderNamesSet),
+    totalImages,
+  };
+};
+
+/**
+ * Generates the official EstateGold Bulk Property Upload Template Excel workbook.
  */
 const generateBulkTemplate = () => {
-  const templateHeaders = [
-    {
-      "Owner Name": "Mr. K. Ramakrishnan",
-      "Owner Phone": "9876543210",
-      "Owner Email": "owner1@example.com",
-      "Owner Address": "12 MG Road, RS Puram, Coimbatore",
-      "Purpose": "Rent",
-      "Property Type": "Apartment / Flat",
-      "Listing Type": "my_own",
-      "Title": "Luxury 3 BHK Flat in Prime Location",
-      "Description": "Spacious 3 BHK apartment with modern amenities and cross-ventilation.",
-      "State": "Tamil Nadu",
-      "City": "Coimbatore",
-      "Locality": "RS Puram",
-      "Society": "Green Valley Apartments",
-      "Address": "124 DB Road, RS Puram",
-      "Price": 35000,
-      "Built-up Area (sq ft)": 1500,
-      "Carpet Area (sq ft)": 1350,
-      "Plot Area (sq ft)": "",
-      "Bedrooms": 3,
-      "Bathrooms": 3,
-      "Balconies": 2,
-      "Floor": 4,
-      "Total Floors": 10,
-      "Facing": "East",
-      "Furnishing": "Semi-Furnished",
-      "Parking": "Yes",
-      "Property Age": "0-1 Years",
-      "Maintenance Charges": 2500,
-      "Agreement Type": "Rental Agreement",
-      "Security Deposit": 150000,
-      "Advance Amount": 35000,
-      "Duration": "11 Months",
-      "Notice Period": "2 Months",
-      "Lock-in Period": "6 Months",
-      "Rent Escalation": "5% per annum",
-      "Photos (URLs comma-separated)": "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2",
-      "Document URLs (comma-separated)": "https://example.com/docs/sale_deed_ramakrishnan.pdf, https://example.com/docs/tax_receipt_2026.pdf",
-      "Sale Deed URL": "https://example.com/docs/sale_deed_ramakrishnan.pdf",
-      "Property Tax Receipt URL": "https://example.com/docs/tax_receipt_2026.pdf",
-    },
-    {
-      "Owner Name": "Suresh Kumar",
-      "Owner Phone": "9812345678",
-      "Owner Email": "owner2@example.com",
-      "Owner Address": "45 Race Course Road, Coimbatore",
-      "Purpose": "Sale",
-      "Property Type": "Villa",
-      "Listing Type": "another_owner",
-      "Title": "Premium 4 BHK Gated Community Villa",
-      "Description": "Independent luxury villa with private garden and clubhouse access.",
-      "State": "Tamil Nadu",
-      "City": "Coimbatore",
-      "Locality": "Race Course",
-      "Society": "Royal Palms Villa",
-      "Address": "45 Race Course Road",
-      "Price": 18500000,
-      "Built-up Area (sq ft)": 3200,
-      "Carpet Area (sq ft)": 2800,
-      "Plot Area (sq ft)": 2400,
-      "Bedrooms": 4,
-      "Bathrooms": 4,
-      "Balconies": 3,
-      "Floor": 2,
-      "Total Floors": 2,
-      "Facing": "North",
-      "Furnishing": "Fully Furnished",
-      "Parking": "Yes",
-      "Property Age": "1-3 Years",
-      "Maintenance Charges": 5000,
-      "Agreement Type": "",
-      "Security Deposit": "",
-      "Advance Amount": "",
-      "Duration": "",
-      "Notice Period": "",
-      "Lock-in Period": "",
-      "Rent Escalation": "",
-      "Photos (URLs comma-separated)": "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9",
-      "Document URLs (comma-separated)": "https://example.com/docs/villa_sale_deed.pdf, https://example.com/docs/ec_certificate.pdf",
-      "Sale Deed URL": "https://example.com/docs/villa_sale_deed.pdf",
-      "Property Tax Receipt URL": "https://example.com/docs/tax_receipt_villa.pdf",
-    },
-    {
-      "Owner Name": "Anand Vardhan",
-      "Owner Phone": "9765432109",
-      "Owner Email": "owner3@example.com",
-      "Owner Address": "88 Avinashi Road, Coimbatore",
-      "Purpose": "Lease",
-      "Property Type": "Commercial Space",
-      "Listing Type": "my_own",
-      "Title": "Prime Commercial Office Space for Long Term Lease",
-      "Description": "Fully fitted office space suitable for IT / Corporate back-office.",
-      "State": "Tamil Nadu",
-      "City": "Coimbatore",
-      "Locality": "Avinashi Road",
-      "Society": "Tech Park Tower",
-      "Address": "88 Avinashi Road, TIDEL Park Zone",
-      "Price": 120000,
-      "Built-up Area (sq ft)": 2500,
-      "Carpet Area (sq ft)": 2200,
-      "Plot Area (sq ft)": "",
-      "Bedrooms": "",
-      "Bathrooms": 2,
-      "Balconies": 0,
-      "Floor": 3,
-      "Total Floors": 8,
-      "Facing": "East",
-      "Furnishing": "Fully Furnished",
-      "Parking": "Yes",
-      "Property Age": "1-3 Years",
-      "Maintenance Charges": 8000,
-      "Agreement Type": "Lease Agreement",
-      "Security Deposit": 600000,
-      "Advance Amount": 120000,
-      "Duration": "3 Years",
-      "Notice Period": "3 Months",
-      "Lock-in Period": "1 Year",
-      "Rent Escalation": "10% every 3 years",
-      "Photos (URLs comma-separated)": "https://images.unsplash.com/photo-1497366216548-37526070297c",
-      "Document URLs (comma-separated)": "https://example.com/docs/commercial_deed.pdf, https://example.com/docs/building_plan.pdf",
-      "Sale Deed URL": "https://example.com/docs/commercial_deed.pdf",
-      "Property Tax Receipt URL": "https://example.com/docs/commercial_tax.pdf",
-    },
+  const workbook = xlsx.utils.book_new();
+
+  // SHEET 1: INSTRUCTIONS
+  const instructionsData = [
+    ["ESTATEGOLD BULK PROPERTY UPLOAD INSTRUCTIONS"],
+    [""],
+    ["Welcome to the EstateGold Bulk Property Upload System!"],
+    ["Follow these simple steps to list multiple properties with automated image mapping:"],
+    [""],
+    ["1. DO NOT MODIFY PROPERTY NUMBERS:"],
+    ["   - Keep the system-generated 'Property Number' column intact (1, 2, 3, 4, 5...)."],
+    ["   - The Property Number acts as the unique mapping key between Excel rows and image folders."],
+    [""],
+    ["2. FILL PROPERTY INFORMATION:"],
+    ["   - Fill out the property details for each row in the 'Property Data' sheet."],
+    ["   - Supported Purposes: Sale, Rent, Lease, PG / Co-Living."],
+    ["   - Required Fields: Purpose, Property Type, Title, City, Locality, Address, Price/Rent."],
+    [""],
+    ["3. PREPARE PROPERTY-WISE IMAGE FOLDERS:"],
+    ["   - Create a separate folder for each property on your computer."],
+    ["   - Folder names MUST match the Property Number (e.g. 'Property 1' or '1' for Property Number 1)."],
+    ["   - Example Folder Structure:"],
+    ["       my_properties.zip"],
+    ["       ├── Property 1/"],
+    ["       │   ├── photo1.jpg"],
+    ["       │   └── photo2.jpg"],
+    ["       ├── Property 2/"],
+    ["       │   ├── photo1.jpg"],
+    ["       │   └── photo2.jpg"],
+    ["       └── Property 3/"],
+    ["           ├── photo1.jpg"],
+    ["           └── photo2.jpg"],
+    [""],
+    ["4. UPLOAD EXCEL & IMAGES ZIP:"],
+    ["   - Upload your filled Excel file (.xlsx) and your Images ZIP file (.zip) on the Bulk Upload page."],
+    ["   - Click 'Validate' to review your data and automatic image folder matching."],
+    ["   - Click 'Publish' to complete the upload!"],
   ];
 
-  const worksheet = xlsx.utils.json_to_sheet(templateHeaders);
-  const workbook = xlsx.utils.book_new();
-  xlsx.utils.book_append_sheet(workbook, worksheet, "Template");
+  const instructionsSheet = xlsx.utils.aoa_to_sheet(instructionsData);
+  xlsx.utils.book_append_sheet(workbook, instructionsSheet, "Instructions");
+
+  // SHEET 2: PROPERTY DATA (With Pre-Populated Property Numbers & Sample Data)
+  const templateRows = [];
+
+  for (let i = 1; i <= 15; i++) {
+    if (i === 1) {
+      // Sample Row 1: Residential Rent
+      templateRows.push({
+        "Property Number": i,
+        "Purpose": "Rent",
+        "Property Type": "Apartment / Flat",
+        "Listing Type": "my_own",
+        "Title": "(SAMPLE) Luxury 3 BHK Flat in Prime Location",
+        "Description": "Spacious 3 BHK apartment with modern amenities and cross-ventilation.",
+        "Owner Name": "Ramakrishnan",
+        "Owner Phone": "9876543210",
+        "Owner Email": "owner1@example.com",
+        "Owner Address": "12 MG Road, RS Puram",
+        "State": "Tamil Nadu",
+        "City": "Coimbatore",
+        "Locality": "RS Puram",
+        "Society": "Green Valley Apartments",
+        "Address": "124 DB Road, RS Puram",
+        "Price": 35000,
+        "Built-up Area (sq ft)": 1500,
+        "Carpet Area (sq ft)": 1350,
+        "Plot Area (sq ft)": "",
+        "Bedrooms": 3,
+        "Bathrooms": 3,
+        "Balconies": 2,
+        "Floor": 4,
+        "Total Floors": 10,
+        "Facing": "East",
+        "Furnishing": "Semi-Furnished",
+        "Parking": "Yes",
+        "Property Age": "0-1 Years",
+        "Maintenance Charges": 2500,
+        "Agreement Type": "Rental Agreement",
+        "Security Deposit": 150000,
+        "Advance Amount": 35000,
+        "Duration": "11 Months",
+        "Notice Period": "2 Months",
+        "PG Name": "",
+        "Publisher Role": "",
+        "Accommodation Type": "",
+        "Suitable For": "",
+        "Occupant Type": "",
+        "Food Availability": "",
+        "Meals Included": "",
+      });
+    } else if (i === 2) {
+      // Sample Row 2: Residential Sale
+      templateRows.push({
+        "Property Number": i,
+        "Purpose": "Sale",
+        "Property Type": "Villa",
+        "Listing Type": "another_owner",
+        "Title": "(SAMPLE) Premium 4 BHK Gated Community Villa",
+        "Description": "Independent luxury villa with private garden and clubhouse access.",
+        "Owner Name": "Suresh Kumar",
+        "Owner Phone": "9812345678",
+        "Owner Email": "owner2@example.com",
+        "Owner Address": "45 Race Course Road",
+        "State": "Tamil Nadu",
+        "City": "Coimbatore",
+        "Locality": "Race Course",
+        "Society": "Royal Palms Villa",
+        "Address": "45 Race Course Road",
+        "Price": 18500000,
+        "Built-up Area (sq ft)": 3200,
+        "Carpet Area (sq ft)": 2800,
+        "Plot Area (sq ft)": 2400,
+        "Bedrooms": 4,
+        "Bathrooms": 4,
+        "Balconies": 3,
+        "Floor": 2,
+        "Total Floors": 2,
+        "Facing": "North",
+        "Furnishing": "Fully Furnished",
+        "Parking": "Yes",
+        "Property Age": "1-3 Years",
+        "Maintenance Charges": 5000,
+        "Agreement Type": "",
+        "Security Deposit": "",
+        "Advance Amount": "",
+        "Duration": "",
+        "Notice Period": "",
+        "PG Name": "",
+        "Publisher Role": "",
+        "Accommodation Type": "",
+        "Suitable For": "",
+        "Occupant Type": "",
+        "Food Availability": "",
+        "Meals Included": "",
+      });
+    } else if (i === 3) {
+      // Sample Row 3: PG / Co-Living
+      templateRows.push({
+        "Property Number": i,
+        "Purpose": "PG / Co-Living",
+        "Property Type": "PG / Hostel",
+        "Listing Type": "my_own",
+        "Title": "(SAMPLE) Green Oasis Premium Men's PG",
+        "Description": "Fully furnished PG for working professionals with 3 meals & high speed WiFi.",
+        "Owner Name": "Karthik Raja",
+        "Owner Phone": "9765432109",
+        "Owner Email": "owner3@example.com",
+        "Owner Address": "88 Saibaba Colony",
+        "State": "Tamil Nadu",
+        "City": "Coimbatore",
+        "Locality": "Saibaba Colony",
+        "Society": "Green Oasis PG",
+        "Address": "88 NSR Road, Saibaba Colony",
+        "Price": 7500,
+        "Built-up Area (sq ft)": 2400,
+        "Carpet Area (sq ft)": 2200,
+        "Plot Area (sq ft)": "",
+        "Bedrooms": "",
+        "Bathrooms": 4,
+        "Balconies": 1,
+        "Floor": 1,
+        "Total Floors": 3,
+        "Facing": "North-East",
+        "Furnishing": "Fully Furnished",
+        "Parking": "Yes",
+        "Property Age": "0-1 Years",
+        "Maintenance Charges": 0,
+        "Agreement Type": "",
+        "Security Deposit": 15000,
+        "Advance Amount": "",
+        "Duration": "",
+        "Notice Period": "1 Month",
+        "PG Name": "Green Oasis Men's PG",
+        "Publisher Role": "PG Owner",
+        "Accommodation Type": "PG / Co-Living",
+        "Suitable For": "Boys",
+        "Occupant Type": "Working Professionals",
+        "Food Availability": "Available",
+        "Meals Included": "Breakfast, Lunch, Dinner",
+      });
+    } else {
+      // Blank Template Row with Property Number pre-filled
+      templateRows.push({
+        "Property Number": i,
+        "Purpose": "",
+        "Property Type": "",
+        "Listing Type": "my_own",
+        "Title": "",
+        "Description": "",
+        "Owner Name": "",
+        "Owner Phone": "",
+        "Owner Email": "",
+        "Owner Address": "",
+        "State": "Tamil Nadu",
+        "City": "Coimbatore",
+        "Locality": "",
+        "Society": "",
+        "Address": "",
+        "Price": "",
+        "Built-up Area (sq ft)": "",
+        "Carpet Area (sq ft)": "",
+        "Plot Area (sq ft)": "",
+        "Bedrooms": "",
+        "Bathrooms": "",
+        "Balconies": "",
+        "Floor": "",
+        "Total Floors": "",
+        "Facing": "",
+        "Furnishing": "",
+        "Parking": "Yes",
+        "Property Age": "",
+        "Maintenance Charges": "",
+        "Agreement Type": "",
+        "Security Deposit": "",
+        "Advance Amount": "",
+        "Duration": "",
+        "Notice Period": "",
+        "PG Name": "",
+        "Publisher Role": "",
+        "Accommodation Type": "",
+        "Suitable For": "",
+        "Occupant Type": "",
+        "Food Availability": "",
+        "Meals Included": "",
+      });
+    }
+  }
+
+  const propertyDataSheet = xlsx.utils.json_to_sheet(templateRows);
+  xlsx.utils.book_append_sheet(workbook, propertyDataSheet, "Property Data");
+
   return xlsx.write(workbook, { type: "buffer", bookType: "xlsx" });
 };
 
 /**
- * Validates each property row independently against EstateGold rules.
+ * Validates each property row independently and matches Property Number <-> ZIP folder.
  */
-const validateBulkProperties = async (rawRows, publisherDetails = {}) => {
+const validateBulkProperties = async (excelFileInput, zipFileInput = null, publisherDetails = {}) => {
+  const rawRows = parseUploadedFile(excelFileInput);
+
   if (!Array.isArray(rawRows) || rawRows.length === 0) {
     return {
       success: false,
-      message: "The uploaded file is empty or contains no valid rows.",
-      totalProperties: 0,
-      eligibleProperties: [],
-      invalidProperties: [],
+      message: "The uploaded Excel file is empty or contains no readable rows.",
+      summary: {
+        totalRows: 0,
+        readyToPublishCount: 0,
+        needsFixingCount: 0,
+        unmappedFoldersCount: 0,
+        totalZipImagesFound: 0,
+      },
+      readyToPublish: [],
+      needsFixing: [],
+      unmappedFolders: [],
     };
   }
 
-  // MANDATORY BUSINESS RULE: Must contain MORE THAN 1 property (at least 2)
-  if (rawRows.length < 2) {
-    return {
-      success: false,
-      isMinPropertyViolation: true,
-      message: "Bulk upload requires more than one property. Please upload a file containing at least 2 properties.",
-      totalProperties: rawRows.length,
-      eligibleProperties: [],
-      invalidProperties: [],
-    };
+  // Parse ZIP archive if provided
+  let zipData = { folderMap: {}, allFolderNames: [], totalImages: 0 };
+  if (zipFileInput) {
+    try {
+      zipData = parseImagesZip(zipFileInput);
+    } catch (zipErr) {
+      console.error("ZIP parsing error:", zipErr);
+    }
   }
 
-  const eligibleProperties = [];
-  const invalidProperties = [];
+  const readyToPublish = [];
+  const needsFixing = [];
+  const processedPropertyNumbers = new Set();
 
   for (let i = 0; i < rawRows.length; i++) {
     const row = rawRows[i];
-    const rowNumber = i + 2; // Row number in Excel (header is row 1)
-    const missingFields = [];
-    const errorDetails = [];
+    const excelRowIndex = i + 2;
 
-    // Extract Owner Details (Flexible keys)
-    const ownerName = getVal(row, ["Owner Name", "Property Owner Name", "ownerName", "Owner", "Publisher Name"]);
-    const ownerPhone = getVal(row, ["Owner Phone", "Owner Phone Number", "ownerPhone", "Phone Number", "Phone"]).replace(/\D/g, "");
-    const ownerEmail = getVal(row, ["Owner Email", "Owner Gmail", "ownerEmail", "Email", "Gmail", "Email Address"]);
-    const ownerAddress = getVal(row, ["Owner Address", "ownerAddress", "Owner Location", "Owner Residence"]);
+    // Extract Property Number
+    const rawPropNum = getVal(row, ["Property Number", "PropertyNo", "Property #", "PropertyID", "PropNum", "S.No"]);
+    const propNum = rawPropNum ? String(parseInt(rawPropNum, 10) || rawPropNum) : String(i + 1);
+    processedPropertyNumbers.add(propNum);
 
-    // Extract Purpose & Listing Type (Flexible keys)
-    const rawPurpose = getVal(row, ["Purpose", "purpose", "Listing Purpose", "Property Purpose"]);
-    const rawListingType = getVal(row, ["Listing Type", "listingType", "Ownership Type"]);
+    const errors = [];
+
+    // Owner Details
+    const ownerName = getVal(row, ["Owner Name", "Property Owner Name", "ownerName", "Owner"]);
+    const ownerPhone = getVal(row, ["Owner Phone", "Owner Phone Number", "ownerPhone", "Phone"]).replace(/\D/g, "");
+    const ownerEmail = getVal(row, ["Owner Email", "ownerEmail", "Email"]);
+    const ownerAddress = getVal(row, ["Owner Address", "ownerAddress"]);
+
+    // Purpose & Listing Type
+    const rawPurpose = getVal(row, ["Purpose", "purpose", "Listing Purpose"]);
+    const rawListingType = getVal(row, ["Listing Type", "listingType"]);
 
     let purpose = "";
     let listingType = "my_own";
 
-    if (["rent", "lease", "sale"].includes(rawPurpose.toLowerCase())) {
-      purpose = rawPurpose.charAt(0).toUpperCase() + rawPurpose.slice(1).toLowerCase();
-    } else if (["rent", "lease", "sale"].includes(rawListingType.toLowerCase())) {
-      purpose = rawListingType.charAt(0).toUpperCase() + rawListingType.slice(1).toLowerCase();
+    const pLower = rawPurpose.toLowerCase();
+    if (pLower.includes("pg") || pLower.includes("co-living") || pLower.includes("hostel")) {
+      purpose = "PG / Co-Living";
+    } else if (pLower.includes("rent")) {
+      purpose = "Rent";
+    } else if (pLower.includes("lease")) {
+      purpose = "Lease";
+    } else if (pLower.includes("sale") || pLower.includes("buy")) {
+      purpose = "Sale";
     }
 
     if (["my_own", "another_owner"].includes(rawListingType.toLowerCase())) {
       listingType = rawListingType.toLowerCase();
     }
 
-    // Extract Property Type (Flexible keys)
-    const rawPropType = getVal(row, ["Property Type", "propertyType", "Type", "Category"]);
-    let propertyType = rawPropType;
-    if (rawPropType.toLowerCase().includes("apartment") || rawPropType.toLowerCase().includes("flat")) {
-      propertyType = "Apartment / Flat";
-    } else if (rawPropType.toLowerCase().includes("villa")) {
-      propertyType = "Villa";
-    } else if (rawPropType.toLowerCase().includes("house")) {
-      propertyType = "Independent House";
-    } else if (rawPropType.toLowerCase().includes("plot") || rawPropType.toLowerCase().includes("land")) {
-      propertyType = "Plot / Land";
-    } else if (rawPropType.toLowerCase().includes("commercial") || rawPropType.toLowerCase().includes("office") || rawPropType.toLowerCase().includes("shop")) {
-      propertyType = "Commercial Space";
-    }
-
-    const title = getVal(row, ["Title", "Property Title", "title", "Name", "Listing Title"]);
-    const description = getVal(row, ["Description", "description", "Overview", "Details"]);
-    const state = getVal(row, ["State", "state", "Province"], "Tamil Nadu");
-    const city = getVal(row, ["City", "city", "Location City"]);
-    const locality = getVal(row, ["Locality", "locality", "Area", "Sub-locality"]);
-    const society = getVal(row, ["Society", "society", "Building Name", "Apartment Name", "Project Name"]);
-    const address = getVal(row, ["Address", "address", "Full Address", "Property Address"]);
-
-    const price = parseFloat(getVal(row, ["Price", "price", "Amount", "Cost"]));
-    const area = parseFloat(getVal(row, ["Area (sq.ft)", "Area (sq ft)", "Built-up Area (sq ft)", "area", "builtUpArea", "Carpet Area (sq.ft)", "carpetArea", "Plot Area (sq.ft)", "plotArea"]));
-    const carpetArea = parseFloat(getVal(row, ["Carpet Area (sq.ft)", "Carpet Area (sq ft)", "carpetArea"])) || area;
-    const plotArea = parseFloat(getVal(row, ["Plot Area (sq.ft)", "Plot Area (sq ft)", "plotArea"])) || (propertyType === "Plot / Land" ? area : 0);
-
-    const bedrooms = parseInt(getVal(row, ["Bedrooms", "bedrooms", "BHK", "No. of Bedrooms"]));
-    const bathrooms = parseInt(getVal(row, ["Bathrooms", "bathrooms", "Washrooms", "No. of Bathrooms"]));
-    const balconies = parseInt(getVal(row, ["Balconies", "balconies"], "0"));
-    const floor = parseInt(getVal(row, ["Floor", "floor", "Floor No"], "0"));
-    const totalFloors = parseInt(getVal(row, ["Total Floors", "totalFloors", "Total Floor"], "1"));
-
-    const facing = getVal(row, ["Facing", "facing", "Direction"], "East");
-    const furnishing = getVal(row, ["Furnishing", "furnishing", "Furnishing Status"], "Semi-Furnished");
-    const parkingVal = getVal(row, ["Parking", "parking", "Parking Spaces", "Covered Parking"]);
-    const parking = parkingVal.toLowerCase() === "yes" || parkingVal.toLowerCase() === "true" || parkingVal === "1" || (parseInt(parkingVal) > 0);
-    const propertyAge = getVal(row, ["Property Age", "propertyAge", "Age"], "1-3 Years");
-    const maintenance = parseFloat(getVal(row, ["Maintenance Charges", "maintenance", "Maintenance"], "0"));
-
-    const agreementType = getVal(row, ["Agreement Type", "agreementType"], purpose === "Lease" ? "Lease Agreement" : "Rental Agreement");
-    const securityDeposit = parseFloat(getVal(row, ["Security Deposit", "securityDeposit", "Deposit"], "0"));
-    const advanceAmount = parseFloat(getVal(row, ["Advance Amount", "advanceAmount", "Token Amount"], "0"));
-    const duration = getVal(row, ["Agreement Duration", "Duration", "duration"]);
-    const noticePeriod = getVal(row, ["Notice Period", "noticePeriod"], "2 Months");
-    const lockInPeriod = getVal(row, ["Lock-in Period", "lockInPeriod"], "6 Months");
-    const rentEscalation = getVal(row, ["Rent Escalation", "rentEscalation"], "5% per annum");
-
-    const photosRaw = getVal(row, ["Photos (URLs comma-separated)", "Photos", "photos", "Images"]);
-    const photos = photosRaw
-      ? photosRaw.split(",").map((s) => s.trim()).filter(Boolean)
-      : [];
-
-    // Extract Property Documents (Flexible header keys)
-    const docsRaw = getVal(row, [
-      "Document URLs (comma-separated)",
-      "Document URLs",
-      "Documents (URLs comma-separated)",
-      "Documents",
-      "Document Links",
-      "Property Documents",
-      "Ownership Documents",
-      "Verification Documents",
-    ]);
-
-    const saleDeedUrl = getVal(row, ["Sale Deed URL", "Sale Deed Link", "Sale Deed", "Title Deed URL", "Title Deed"]);
-    const taxReceiptUrl = getVal(row, ["Tax Receipt URL", "Property Tax Receipt URL", "Property Tax Receipt", "Tax Receipt"]);
-    const ecUrl = getVal(row, ["Encumbrance Certificate URL", "EC URL", "Encumbrance Certificate"]);
-    const buildingPlanUrl = getVal(row, ["Building Plan URL", "Approved Building Plan URL", "Building Plan"]);
-
-    const uploadedDocuments = [];
-
-    if (docsRaw) {
-      const urls = docsRaw.split(",").map((s) => s.trim()).filter(Boolean);
-      urls.forEach((url, idx) => {
-        uploadedDocuments.push({
-          documentType: idx === 0 ? "sale_deed" : idx === 1 ? "tax_receipt" : "property_document",
-          fileUrl: url,
-          fileName: `Property_Document_${idx + 1}.pdf`,
-          verificationStatus: "Uploaded",
-          uploadedAt: new Date(),
-        });
-      });
-    }
-
-    if (saleDeedUrl && !uploadedDocuments.some((d) => d.fileUrl === saleDeedUrl)) {
-      uploadedDocuments.push({
-        documentType: "sale_deed",
-        fileUrl: saleDeedUrl,
-        fileName: "Sale_Deed.pdf",
-        verificationStatus: "Uploaded",
-        uploadedAt: new Date(),
-      });
-    }
-
-    if (taxReceiptUrl && !uploadedDocuments.some((d) => d.fileUrl === taxReceiptUrl)) {
-      uploadedDocuments.push({
-        documentType: "tax_receipt",
-        fileUrl: taxReceiptUrl,
-        fileName: "Property_Tax_Receipt.pdf",
-        verificationStatus: "Uploaded",
-        uploadedAt: new Date(),
-      });
-    }
-
-    if (ecUrl && !uploadedDocuments.some((d) => d.fileUrl === ecUrl)) {
-      uploadedDocuments.push({
-        documentType: "encumbrance_certificate",
-        fileUrl: ecUrl,
-        fileName: "Encumbrance_Certificate.pdf",
-        verificationStatus: "Uploaded",
-        uploadedAt: new Date(),
-      });
-    }
-
-    if (buildingPlanUrl && !uploadedDocuments.some((d) => d.fileUrl === buildingPlanUrl)) {
-      uploadedDocuments.push({
-        documentType: "building_plan",
-        fileUrl: buildingPlanUrl,
-        fileName: "Approved_Building_Plan.pdf",
-        verificationStatus: "Uploaded",
-        uploadedAt: new Date(),
-      });
-    }
-
-    // 1. Validate Mandatory Owner Details
-    if (!ownerName) missingFields.push("Owner Name");
-    if (!ownerPhone || ownerPhone.length !== 10) {
-      missingFields.push("Owner Phone");
-      errorDetails.push("Owner Phone must be exactly 10 digits.");
-    }
-    if (!ownerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) {
-      missingFields.push("Owner Email");
-      errorDetails.push("Owner Email must be a valid email address.");
-    }
-    if (!ownerAddress) missingFields.push("Owner Address");
-
-    // 2. Validate Base Property Fields
     if (!purpose) {
-      missingFields.push("Purpose (Rent/Lease/Sale)");
-    } else if (!["rent", "lease", "sale"].includes(purpose.toLowerCase())) {
-      missingFields.push("Purpose");
-      errorDetails.push("Purpose must be Rent, Lease, or Sale.");
-    }
-    if (!propertyType) missingFields.push("Property Type");
-    if (!state) missingFields.push("State");
-    if (!city) missingFields.push("City");
-    if (!locality) missingFields.push("Locality");
-    if (!address) missingFields.push("Full Address");
-
-    if (isNaN(price) || price <= 0) {
-      missingFields.push("Price");
-      errorDetails.push("Price must be a positive number.");
+      errors.push("Listing Purpose is required (Sale, Rent, Lease, or PG / Co-Living).");
     }
 
-    // 3. Property Type Specific Validations
-    const isResidential = ["Apartment / Flat", "Independent House", "Villa", "Builder Floor"].includes(propertyType);
-    const isPlot = ["Plot / Land", "Residential Plot", "Agricultural Land"].includes(propertyType);
+    // Property Type
+    const rawPropType = getVal(row, ["Property Type", "propertyType", "Type"]);
+    let propertyType = rawPropType;
 
-    if (isResidential) {
-      if (isNaN(bedrooms) || bedrooms < 1) missingFields.push("Bedrooms");
-      if (isNaN(bathrooms) || bathrooms < 1) missingFields.push("Bathrooms");
-      if (isNaN(carpetArea) || carpetArea <= 0) {
-        if (isNaN(area) || area <= 0) {
-          missingFields.push("Carpet / Built-up Area");
-        }
-      }
-      if (!facing) missingFields.push("Facing Direction");
-      if (!furnishing) missingFields.push("Furnishing Status");
-    } else if (isPlot) {
-      if (isNaN(plotArea) || plotArea <= 0) {
-        if (isNaN(area) || area <= 0) {
-          missingFields.push("Plot Area");
-        }
-      }
-    } else {
-      // Commercial, Office, Shop, etc.
-      if (isNaN(area) || area <= 0) missingFields.push("Built-up / Usable Area");
+    const tLower = rawPropType.toLowerCase();
+    if (tLower.includes("apartment") || tLower.includes("flat")) propertyType = "Apartment / Flat";
+    else if (tLower.includes("villa")) propertyType = "Villa";
+    else if (tLower.includes("house") || tLower.includes("independent")) propertyType = "Independent House";
+    else if (tLower.includes("builder") || tLower.includes("floor")) propertyType = "Builder Floor";
+    else if (tLower.includes("plot") || tLower.includes("land")) propertyType = "Plot / Land";
+    else if (tLower.includes("commercial") || tLower.includes("office") || tLower.includes("shop")) propertyType = "Commercial Space";
+    else if (tLower.includes("pg") || tLower.includes("hostel")) propertyType = "PG / Hostel";
+
+    if (!propertyType) {
+      errors.push("Property Type is required.");
     }
 
-    // 4. Rent / Lease Agreement Details Validation
-    const isRentOrLease = purpose.toLowerCase() === "rent" || purpose.toLowerCase() === "lease";
-    if (isRentOrLease) {
-      if (!agreementType) missingFields.push("Agreement Type");
-      if (isNaN(securityDeposit) || securityDeposit <= 0) missingFields.push("Security Deposit");
-      if (!duration) missingFields.push("Agreement Duration");
+    const title = getVal(row, ["Title", "Property Title", "title"]);
+    const description = getVal(row, ["Description", "description"]);
+    const state = getVal(row, ["State", "state"], "Tamil Nadu");
+    const city = getVal(row, ["City", "city"]);
+    const locality = getVal(row, ["Locality", "locality"]);
+    const society = getVal(row, ["Society", "society"]);
+    const address = getVal(row, ["Address", "address"]);
+
+    if (!title) errors.push("Property Title is required.");
+    if (!city) errors.push("City is required.");
+    if (!locality) errors.push("Locality is required.");
+    if (!address) errors.push("Address is required.");
+
+    const price = parseFloat(getVal(row, ["Price", "price", "Rent", "Amount"])) || 0;
+    if (price <= 0) {
+      errors.push("Valid Price / Rent is required (must be greater than 0).");
     }
 
-    // 5. REQUIRED PROPERTY DOCUMENT AVAILABILITY VALIDATION
-    if (uploadedDocuments.length === 0) {
-      missingFields.push("Required Property Verification Documents (Sale Deed / Title Deed / Tax Receipt / EC)");
-      errorDetails.push(
-        "Property document availability check failed: At least one required property verification document URL (e.g., Sale Deed URL, Title Deed URL, Tax Receipt URL, or Encumbrance Certificate URL) must be provided."
-      );
-    }
+    const area = parseFloat(getVal(row, ["Area (sq ft)", "Built-up Area (sq ft)", "area"])) || 0;
+    const carpetArea = parseFloat(getVal(row, ["Carpet Area (sq ft)", "carpetArea"])) || area;
+    const plotArea = parseFloat(getVal(row, ["Plot Area (sq ft)", "plotArea"])) || (propertyType === "Plot / Land" ? area : 0);
 
-    // 6. Serviceability Check (if location is provided)
-    let serviceableAreaId = null;
-    if (city && locality) {
-      try {
-        const serviceCheck = await checkPropertyServiceability({ city, locality, address, state });
-        if (serviceCheck.isServiceable && serviceCheck.matchedLocation) {
-          serviceableAreaId = serviceCheck.matchedLocation._id;
-        }
-      } catch (e) {
-        // Location check error ignored for bulk validate
-      }
-    }
+    const bedrooms = parseInt(getVal(row, ["Bedrooms", "bedrooms"])) || 0;
+    const bathrooms = parseInt(getVal(row, ["Bathrooms", "bathrooms"])) || 0;
+    const balconies = parseInt(getVal(row, ["Balconies", "balconies"])) || 0;
+    const floor = parseInt(getVal(row, ["Floor", "floor"])) || 0;
+    const totalFloors = parseInt(getVal(row, ["Total Floors", "totalFloors"])) || 1;
 
-    if (missingFields.length > 0 || errorDetails.length > 0) {
-      invalidProperties.push({
-        rowNumber,
-        propertyType: propertyType || "Unknown",
-        title: title || `${bedrooms ? bedrooms + " BHK " : ""}${propertyType || "Property"} at ${locality || city || "N/A"}`,
-        missingFields,
-        errorDetails: errorDetails.length > 0 ? errorDetails : missingFields.map((f) => `Missing required field: ${f}`),
-        rawRow: row,
-      });
-    } else {
-      const normalizedData = {
-        rowNumber,
-        ownerName,
-        ownerPhone,
-        ownerEmail,
-        ownerAddress,
-        purpose,
-        propertyType,
-        listingType,
-        title: title || `${bedrooms ? bedrooms + " BHK " : ""}${propertyType} in ${locality}, ${city}`,
-        description: description || `Splendid ${propertyType} available for ${purpose} located in ${locality}, ${city}.`,
-        state,
-        city,
-        locality,
-        society,
-        address,
-        price,
-        area: area || carpetArea || plotArea || 0,
-        carpetArea: carpetArea || area || 0,
-        plotArea: plotArea || 0,
-        bedrooms: bedrooms || 0,
-        bathrooms: bathrooms || 0,
-        balconies,
-        floor,
-        totalFloors,
-        facing,
+    const facing = getVal(row, ["Facing", "facing"], "East");
+    const furnishing = getVal(row, ["Furnishing", "furnishing"], "Semi-Furnished");
+    const parkingVal = getVal(row, ["Parking", "parking"]);
+    const parking = parkingVal.toLowerCase() === "yes" || parkingVal.toLowerCase() === "true" || parkingVal === "1";
+    const propertyAge = getVal(row, ["Property Age", "propertyAge"], "1-3 Years");
+    const maintenance = parseFloat(getVal(row, ["Maintenance Charges", "maintenance"])) || 0;
+
+    // PG Details
+    let pgDetails = null;
+    if (purpose === "PG / Co-Living") {
+      const pgName = getVal(row, ["PG Name", "pgName"], title);
+      const publisherType = getVal(row, ["Publisher Role", "publisherType"], "PG Owner");
+      const accommodationType = getVal(row, ["Accommodation Type", "accommodationType"], "PG / Co-Living");
+      const suitableFor = getVal(row, ["Suitable For", "suitableFor"], "Anyone");
+      const occupantType = getVal(row, ["Occupant Type", "occupantType"], "Students & Professionals");
+      const foodAvailability = getVal(row, ["Food Availability", "foodAvailability"], "Available");
+      const mealsRaw = getVal(row, ["Meals Included", "mealsIncluded"]);
+      const mealsIncluded = mealsRaw ? mealsRaw.split(",").map((m) => m.trim()).filter(Boolean) : ["Breakfast", "Dinner"];
+
+      pgDetails = {
+        pgName,
+        publisherType,
+        accommodationType,
+        suitableFor,
+        occupantType,
+        foodAvailability,
+        mealsIncluded,
         furnishing,
-        parking,
-        propertyAge,
-        maintenance,
-        photos,
-        documents: uploadedDocuments,
-        serviceableAreaId,
-        ...(isRentOrLease
-          ? {
-              agreementDetails: {
-                agreementType,
-                amount: price,
-                advanceAmount: advanceAmount || price,
-                securityDeposit,
-                duration,
-                noticePeriod,
-                lockInPeriod,
-                rentEscalation,
-              },
-            }
-          : {}),
+        rooms: [
+          {
+            roomId: `room_${Date.now()}_1`,
+            roomType: propertyType,
+            sharingType: "Single Sharing",
+            roomCount: 1,
+            totalBeds: 1,
+            occupiedBeds: 0,
+            reservedBeds: 0,
+            availableBeds: 1,
+            pricePerPerson: price,
+            securityDeposit: parseFloat(getVal(row, ["Security Deposit", "securityDeposit"])) || 0,
+            bathroomType: "Attached Bath",
+            ac: true,
+            status: "AVAILABLE",
+          },
+        ],
+        facilities: ["WiFi", "Power Backup", "Washing Machine", "CCTV"],
+        charges: {
+          securityDeposit: parseFloat(getVal(row, ["Security Deposit", "securityDeposit"])) || 0,
+          maintenanceCharges: maintenance,
+          noticePeriod: getVal(row, ["Notice Period", "noticePeriod"], "1 Month"),
+        },
       };
+    }
 
-      eligibleProperties.push(normalizedData);
+    // CHECK SERVICEABILITY
+    let serviceability = null;
+    try {
+      const serviceCheck = await checkPropertyServiceability(city, locality);
+      if (!serviceCheck.isServiceable) {
+        errors.push(`Location ${locality}, ${city} is currently not in a serviceable area.`);
+      } else {
+        serviceability = serviceCheck;
+      }
+    } catch (geoErr) {
+      // Ignore geo lookup errors during bulk validation
+    }
+
+    // MATCH PROPERTY NUMBER AGAINST ZIP FOLDERS
+    const zipImages = zipData.folderMap[propNum] || zipData.folderMap[String(i + 1)] || [];
+    const imageFolderFound = zipImages.length > 0;
+
+    const propertyPayload = {
+      propertyNumber: propNum,
+      excelRowIndex,
+      purpose,
+      propertyType,
+      listingType,
+      title,
+      description,
+      ownerName: ownerName || publisherDetails.contactName || "Property Owner",
+      ownerPhone: ownerPhone || publisherDetails.contactPhone || "9876543210",
+      ownerEmail: ownerEmail || publisherDetails.contactEmail || "",
+      ownerAddress: ownerAddress || publisherDetails.contactAddress || "",
+      state,
+      city,
+      locality,
+      society,
+      address,
+      price,
+      area,
+      carpetArea,
+      plotArea,
+      bedrooms,
+      bathrooms,
+      balconies,
+      floor,
+      totalFloors,
+      facing,
+      furnishing,
+      parking,
+      propertyAge,
+      maintenance,
+      pgDetails,
+      imageFolderFound,
+      imagesCount: zipImages.length,
+      zipImages: zipImages.map((img) => img.fileName),
+    };
+
+    if (errors.length === 0) {
+      readyToPublish.push(propertyPayload);
+    } else {
+      needsFixing.push({
+        ...propertyPayload,
+        errors,
+      });
     }
   }
 
+  // IDENTIFY UNMAPPED ZIP FOLDERS
+  const unmappedFolders = (zipData.allFolderNames || []).filter((folderName) => {
+    const match = folderName.match(/(?:property|prop|folder|num|no)?[\s\-_]*(\d+)/i);
+    const folderNumKey = match ? String(parseInt(match[1], 10)) : folderName.trim().toLowerCase();
+    return !processedPropertyNumbers.has(folderNumKey);
+  });
+
   return {
     success: true,
-    totalProperties: rawRows.length,
-    eligibleCount: eligibleProperties.length,
-    invalidCount: invalidProperties.length,
-    eligibleProperties,
-    invalidProperties,
+    summary: {
+      totalRows: rawRows.length,
+      readyToPublishCount: readyToPublish.length,
+      needsFixingCount: needsFixing.length,
+      unmappedFoldersCount: unmappedFolders.length,
+      totalZipImagesFound: zipData.totalImages || 0,
+    },
+    readyToPublish,
+    needsFixing,
+    unmappedFolders,
   };
 };
 
 /**
- * Generates an Excel Error Report buffer for invalid properties.
+ * Creates MongoDB property documents and uploads folder images to Cloudinary / Local storage.
  */
-const generateErrorReportBuffer = (invalidProperties) => {
-  const reportRows = invalidProperties.map((inv) => ({
-    "Excel Row #": inv.rowNumber,
-    "Property Type": inv.propertyType,
-    "Title / Reference": inv.title,
-    "Status": "Needs Attention",
-    "Missing Required Fields": inv.missingFields.join(", "),
-    "Error Details": inv.errorDetails.join(" | "),
-  }));
-
-  const worksheet = xlsx.utils.json_to_sheet(reportRows);
-  const workbook = xlsx.utils.book_new();
-  xlsx.utils.book_append_sheet(workbook, worksheet, "Error_Report");
-  return xlsx.write(workbook, { type: "buffer", bookType: "xlsx" });
-};
-
-/**
- * Saves eligible pre-validated bulk properties into MongoDB.
- */
-const publishBulkProperties = async (eligibleProperties, agentUser, publisherDetails = {}) => {
+const publishBulkProperties = async (eligibleProperties, user, publisherDetails = {}, zipFileInput = null) => {
   if (!Array.isArray(eligibleProperties) || eligibleProperties.length === 0) {
-    return {
-      success: false,
-      message: "No eligible properties provided for publishing.",
-      publishedCount: 0,
-      failedCount: 0,
-      publishedProperties: [],
-    };
+    throw new Error("No eligible properties provided for publishing.");
   }
 
-  const agentId = agentUser._id || agentUser.id;
-
-  let settings = await SystemSettings.findOne();
-  const approvalRequired = settings ? (settings.propertyApprovalRequired ?? true) : true;
-  const initialStatus = approvalRequired ? "pending" : "approved";
-  const approvalStatus = initialStatus === "approved" ? "approved" : "pending";
-  const verificationStatus = initialStatus === "approved" ? "verified" : "unverified";
-
-  const createdProps = [];
-  let failedCount = 0;
-
-  for (const item of eligibleProperties) {
+  // Parse ZIP archive if provided for image extraction
+  let zipData = { folderMap: {} };
+  if (zipFileInput) {
     try {
-      const { rowNumber, ...propertyData } = item;
+      zipData = parseImagesZip(zipFileInput);
+    } catch (e) {
+      console.error("Failed to parse ZIP file during publish:", e);
+    }
+  }
 
-      if (!propertyData.serviceableAreaId) {
-        delete propertyData.serviceableAreaId;
+  const uploadDir = path.join(process.cwd(), "uploads/properties");
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+
+  const publishedResults = [];
+  const failedResults = [];
+  let totalImagesUploaded = 0;
+
+  for (let i = 0; i < eligibleProperties.length; i++) {
+    const item = eligibleProperties[i];
+    try {
+      const serviceCheck = await checkPropertyServiceability(item.city, item.locality);
+
+      let lat = 11.0168;
+      let lng = 76.9558;
+      let areaId = null;
+
+      if (serviceCheck && serviceCheck.isServiceable && serviceCheck.matchedLocation) {
+        lat = serviceCheck.latitude || lat;
+        lng = serviceCheck.longitude || lng;
+        areaId = serviceCheck.matchedLocation._id;
       }
 
-      const propDoc = new Property({
-        ...propertyData,
-        ownerName: item.ownerName,
-        ownerPhone: item.ownerPhone,
-        ownerEmail: item.ownerEmail,
-        ownerAddress: item.ownerAddress,
-        createdBy: agentId,
-        ownerId: agentId,
-        role: "agent",
-        ownerRole: "agent",
-        // Status requires admin approval before appearing in public listings
+      // Check if approval is required
+      let approvalRequired = true;
+      try {
+        const sysSettings = await SystemSettings.findOne({ key: "approval_settings" });
+        if (sysSettings && sysSettings.value) {
+          approvalRequired = Boolean(sysSettings.value.requirePropertyApproval);
+        }
+      } catch (sysErr) {
+        // Fallback
+      }
+
+      const initialStatus = approvalRequired ? "pending" : "approved";
+      const cleanedData = cleanPropertyDetails(item.propertyType, item);
+
+      // Save property images from ZIP
+      const propNum = String(item.propertyNumber);
+      const zipImageEntries = zipData.folderMap[propNum] || zipData.folderMap[String(i + 1)] || [];
+      const savedPhotoFilenames = [];
+
+      for (let j = 0; j < zipImageEntries.length; j++) {
+        const imgEntry = zipImageEntries[j];
+        try {
+          const imgBuffer = imgEntry.getData();
+          const ext = path.extname(imgEntry.fileName).toLowerCase() || ".jpg";
+          const uniqueFilename = `${Date.now()}_prop${propNum}_${j + 1}${ext}`;
+          const filePath = path.join(uploadDir, uniqueFilename);
+
+          fs.writeFileSync(filePath, imgBuffer);
+          savedPhotoFilenames.push(uniqueFilename);
+          totalImagesUploaded++;
+        } catch (imgErr) {
+          console.error(`Failed to save image ${imgEntry.fileName} for property ${propNum}:`, imgErr);
+        }
+      }
+
+      const newProperty = await Property.create({
+        ...cleanedData,
+        ownerName: item.ownerName || publisherDetails.contactName || user.name || "Property Owner",
+        ownerPhone: item.ownerPhone || publisherDetails.contactPhone || user.phone || "9876543210",
+        ownerEmail: item.ownerEmail || publisherDetails.contactEmail || user.email || "",
+        ownerAddress: item.ownerAddress || publisherDetails.contactAddress || "",
+        ownerId: user._id || user.id,
+        createdBy: user._id || user.id,
         status: initialStatus,
-        approvalStatus: approvalStatus,
-        verificationStatus: verificationStatus,
         availabilityStatus: "on_sale",
+        latitude: lat,
+        longitude: lng,
+        serviceableAreaId: areaId,
+        photos: savedPhotoFilenames.length > 0 ? savedPhotoFilenames : ["default_property.jpg"],
+        pgDetails: item.pgDetails || undefined,
       });
-      await propDoc.save();
-      createdProps.push(propDoc);
+
+      publishedResults.push({
+        propertyNumber: propNum,
+        propertyId: newProperty._id,
+        title: newProperty.title || item.title,
+        imagesCount: savedPhotoFilenames.length,
+        status: newProperty.status,
+      });
     } catch (err) {
-      console.error("Failed to publish bulk property row:", err);
-      failedCount++;
+      console.error(`Failed to publish property row ${item.propertyNumber}:`, err);
+      failedResults.push({
+        propertyNumber: item.propertyNumber,
+        title: item.title || `Property ${item.propertyNumber}`,
+        error: err.message || "Failed to create property document.",
+      });
     }
   }
 
   return {
     success: true,
-    publishedCount: createdProps.length,
-    failedCount,
-    publishedProperties: createdProps,
+    message: `Bulk property publishing completed. ${publishedResults.length} properties published successfully.`,
+    summary: {
+      totalSubmitted: eligibleProperties.length,
+      successfullyPublished: publishedResults.length,
+      failedCount: failedResults.length,
+      totalImagesUploaded,
+    },
+    publishedResults,
+    failedResults,
   };
 };
 
 module.exports = {
   parseUploadedFile,
+  parseImagesZip,
   generateBulkTemplate,
   validateBulkProperties,
-  generateErrorReportBuffer,
   publishBulkProperties,
 };

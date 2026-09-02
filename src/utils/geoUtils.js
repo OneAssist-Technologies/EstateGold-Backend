@@ -104,6 +104,11 @@ function isServiceAllowed(allowedServices, targetPurpose) {
       return true;
     if (target === "rent" && allowed === "rent") return true;
     if (target === "lease" && allowed === "lease") return true;
+    if (
+      (target === "pg_co_living" || target === "pg / co-living" || target === "pg") &&
+      (allowed === "pg_co_living" || allowed === "pg / co-living" || allowed === "pg" || allowed === "pg/co-living")
+    )
+      return true;
 
     return false;
   });
