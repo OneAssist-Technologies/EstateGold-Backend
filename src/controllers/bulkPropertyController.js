@@ -81,7 +81,7 @@ exports.validateBulkUpload = async (req, res) => {
       }
     }
 
-    const result = await validateBulkProperties(excelFile, zipFile, publisherDetails);
+    const result = await validateBulkProperties(excelFile, zipFile, publisherDetails, req.user);
 
     // Clean up uploaded temporary files if on disk
     [excelFile, zipFile].forEach((f) => {
@@ -172,7 +172,8 @@ exports.publishBulkProperties = async (req, res) => {
       }
     }
 
-    return res.status(201).json(result);
+    const statusCode = (result.summary && result.summary.successfullyPublished > 0) ? 201 : 400;
+    return res.status(statusCode).json(result);
   } catch (err) {
     console.error("Error in publishBulkProperties:", err);
     return res.status(500).json({

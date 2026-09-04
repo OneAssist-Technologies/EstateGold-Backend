@@ -3,6 +3,11 @@ const mongoose = require("mongoose");
 const propertySchema =
   new mongoose.Schema(
     {
+      title: String,
+      isDraft: {
+        type: Boolean,
+        default: false,
+      },
       purpose: {
         type: String,
         required: true,
