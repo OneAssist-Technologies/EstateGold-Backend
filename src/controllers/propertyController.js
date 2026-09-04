@@ -110,13 +110,13 @@ const safeNumber = (
 
 const cleanPropertyDetails = (propertyType, body) => {
   const commonFields = [
-    "purpose", "propertyType", "ownerName", "ownerPhone", "ownerEmail", "ownerType",
+    "title", "isDraft", "purpose", "propertyType", "ownerName", "ownerPhone", "ownerEmail", "ownerType",
     "agentRelation", "ownerIdType", "ownerIdNumber", "ownerGovtIdDoc", "ownerAddress",
     "listingType", "city", "state", "locality", "society", "address", "latitude",
     "longitude", "serviceableAreaId", "price", "description", "availableFrom", "photos",
     "neighbourhood", "status", "availabilityStatus", "role", "createdBy", "ownerNegotiable",
     "ownerReadyToMeet", "marketInsight", "amenities", "facing", "pendingIssues", "documents",
-    "ownershipType", "numberOfOwners", "pan"
+    "ownershipType", "numberOfOwners", "pan", "agreementDetails", "pgDetails"
   ];
 
   let allowedTypeFields = [];
@@ -250,6 +250,7 @@ const cleanPropertyDetails = (propertyType, body) => {
   return cleaned;
 };
 
+exports.cleanPropertyDetails = cleanPropertyDetails;
 
 const SystemSettings = require("../models/SystemSettings");
 
@@ -332,6 +333,51 @@ exports.createProperty =
           }
         } catch (err) {
           console.error("Failed to parse documents:", err);
+        }
+      }
+      if (req.body.agreementDetails) {
+        try {
+          if (typeof req.body.agreementDetails === "string") {
+            req.body.agreementDetails = JSON.parse(req.body.agreementDetails);
+          }
+        } catch (err) {
+          console.error("Failed to parse agreementDetails:", err);
+        }
+      }
+      if (req.body.pgDetails) {
+        try {
+          if (typeof req.body.pgDetails === "string") {
+            req.body.pgDetails = JSON.parse(req.body.pgDetails);
+          }
+          if (req.body.pgDetails && Array.isArray(req.body.pgDetails.rooms)) {
+            req.body.pgDetails.rooms = req.body.pgDetails.rooms.map((room, idx) => {
+              const count = Number(room.roomCount) || 1;
+              const bedsPerRoom = Number(room.totalBeds) || 0;
+              const totCapacity = count * bedsPerRoom;
+              const occ = Number(room.occupiedBeds) || 0;
+              const resv = Number(room.reservedBeds) || 0;
+              const avail = Math.max(0, totCapacity - occ - resv);
+              let status = room.status || "AVAILABLE";
+              if (status !== "UNAVAILABLE" && status !== "BLOCKED") {
+                if (avail === 0 && totCapacity > 0) status = "FULL";
+                else if (occ > 0) status = "PARTIALLY_AVAILABLE";
+              }
+              return {
+                ...room,
+                roomId: room.roomId || `room_${Date.now()}_${idx}`,
+                roomCount: count,
+                totalBeds: bedsPerRoom,
+                occupiedBeds: occ,
+                reservedBeds: resv,
+                availableBeds: avail,
+                pricePerPerson: Number(room.pricePerPerson) || 0,
+                securityDeposit: Number(room.securityDeposit) || 0,
+                status,
+              };
+            });
+          }
+        } catch (err) {
+          console.error("Failed to parse pgDetails:", err);
         }
       }
 
@@ -507,7 +553,11 @@ exports.getProperties = async (req, res) => {
         } else if (/plot|land/i.test(pType)) {
           nearbyQuery.propertyType = { $regex: /plot|land/i };
         } else if (/commercial/i.test(pType)) {
-          nearbyQuery.propertyType = { $regex: /commercial/i };
+          nearbyQuery.propertyType = {
+            $in: [
+              "Commercial Space", "Office Space", "Shop / Retail", "Warehouse", "Industrial Property", "Hotel / Resort"
+            ]
+          };
         } else if (/builder|floor/i.test(pType)) {
           nearbyQuery.propertyType = { $regex: /builder|floor/i };
         } else if (/villa/i.test(pType)) {
@@ -518,10 +568,14 @@ exports.getProperties = async (req, res) => {
       }
       if (activePurpose) {
         const purpTrim = activePurpose.trim().toLowerCase();
-        if (purpTrim === "rent" || purpTrim === "for rent" || purpTrim === "lease") {
-          nearbyQuery.purpose = { $regex: /rent|lease/i };
+        if (purpTrim === "pg_co_living" || purpTrim === "pg / co-living" || purpTrim === "pg" || purpTrim === "co-living" || purpTrim === "pg_coliving") {
+          nearbyQuery.purpose = { $regex: /pg|co-living|pg_co_living/i };
+        } else if (purpTrim === "rent" || purpTrim === "for rent") {
+          nearbyQuery.purpose = { $regex: /^rent$|^for rent$/i };
+        } else if (purpTrim === "lease" || purpTrim === "for lease") {
+          nearbyQuery.purpose = { $regex: /^lease$|^for lease$/i };
         } else if (purpTrim === "buy" || purpTrim === "sale" || purpTrim === "sell" || purpTrim === "for sale") {
-          nearbyQuery.purpose = { $regex: /buy|sale|sell/i };
+          nearbyQuery.purpose = { $regex: /^sale$|^buy$|^sell$|^for sale$/i };
         } else {
           nearbyQuery.purpose = { $regex: new RegExp(activePurpose.trim(), "i") };
         }
@@ -597,7 +651,7 @@ exports.getProperties = async (req, res) => {
     }
 
     // Resolve query parameters using direct query param or AI parsed query
-    const activePurpose = getFilterVal("purpose", "purpose");
+    const activePurpose = req.query.listingPurpose || getFilterVal("purpose", "purpose");
     const activeCity = getFilterVal("city", "city");
     const activePropertyType = getFilterVal("propertyType", "propertyType");
     const activeBedrooms = getFilterVal("bedrooms", "bedrooms");
@@ -609,13 +663,34 @@ exports.getProperties = async (req, res) => {
     // Purpose
     if (activePurpose && activePurpose.trim() !== "") {
       const purpTrim = activePurpose.trim().toLowerCase();
-      if (purpTrim === "rent" || purpTrim === "for rent" || purpTrim === "lease") {
-        query.purpose = { $regex: /rent|lease/i };
+      if (purpTrim === "pg_co_living" || purpTrim === "pg / co-living" || purpTrim === "pg" || purpTrim === "co-living" || purpTrim === "pg_coliving") {
+        query.purpose = { $regex: /pg|co-living|pg_co_living/i };
+      } else if (purpTrim === "rent" || purpTrim === "for rent") {
+        query.purpose = { $regex: /^rent$|^for rent$/i };
+      } else if (purpTrim === "lease" || purpTrim === "for lease") {
+        query.purpose = { $regex: /^lease$|^for lease$/i };
       } else if (purpTrim === "buy" || purpTrim === "sale" || purpTrim === "sell" || purpTrim === "for sale") {
-        query.purpose = { $regex: /buy|sale|sell/i };
+        query.purpose = { $regex: /^sale$|^buy$|^sell$|^for sale$/i };
       } else {
         query.purpose = { $regex: new RegExp(activePurpose.trim(), "i") };
       }
+    }
+
+    // PG Specific Filters
+    if (req.query.suitableFor && req.query.suitableFor.trim() !== "") {
+      query["pgDetails.suitableFor"] = { $regex: new RegExp(req.query.suitableFor.trim(), "i") };
+    }
+    if (req.query.occupantType && req.query.occupantType.trim() !== "") {
+      query["pgDetails.occupantType"] = { $regex: new RegExp(req.query.occupantType.trim(), "i") };
+    }
+    if (req.query.sharingType && req.query.sharingType.trim() !== "") {
+      query["pgDetails.rooms.sharingType"] = { $regex: new RegExp(req.query.sharingType.trim(), "i") };
+    }
+    if (req.query.food === "true" || req.query.foodAvailability === "Available") {
+      query["pgDetails.foodAvailability"] = { $ne: "Not Available" };
+    }
+    if (req.query.ac === "true") {
+      query["pgDetails.rooms.ac"] = true;
     }
 
     // City
@@ -631,36 +706,56 @@ exports.getProperties = async (req, res) => {
     // Property Type
     if (activePropertyType && activePropertyType.trim() !== "") {
       const pType = activePropertyType.trim();
-      const dbPropertyTypes = [
-        "Agricultural Land", "Apartment / Flat", "Builder / New Project", "Builder Floor",
-        "Commercial Space", "Hotel / Resort", "Independent House", "Industrial Property",
-        "Office Space", "PG / Hostel", "Plot / Land", "Residential Plot", "Shop / Retail",
-        "Villa", "Warehouse"
+      const pTypeLower = pType.toLowerCase();
+
+      const commercialTypes = [
+        "Commercial Space",
+        "Office Space",
+        "Shop / Retail",
+        "Warehouse",
+        "Industrial Property",
+        "Hotel / Resort"
       ];
 
-      const exactType = dbPropertyTypes.find(t => t.toLowerCase() === pType.toLowerCase());
-      if (exactType) {
-        query.propertyType = exactType;
+      if (
+        pTypeLower === "commercial" ||
+        pTypeLower === "commercial space" ||
+        pTypeLower === "commercial spaces" ||
+        pTypeLower === "commercials"
+      ) {
+        query.propertyType = { $in: commercialTypes };
       } else {
-        // Fallback to grouped/partial logic
-        if (/apartment|flat/i.test(pType)) {
-          query.propertyType = { $regex: /apartment|flat/i };
-        } else if (/house|independent/i.test(pType)) {
-          query.propertyType = { $regex: /house|independent/i };
-        } else if (/plot|land/i.test(pType)) {
-          if (pType.toLowerCase() === "plot" || pType.toLowerCase() === "plot / land" || pType.toLowerCase() === "residential plot") {
-            query.propertyType = { $in: ["Plot / Land", "Residential Plot"] };
-          } else {
-            query.propertyType = { $regex: /plot|land/i };
-          }
-        } else if (/commercial/i.test(pType)) {
-          query.propertyType = { $regex: /commercial/i };
-        } else if (/builder|floor/i.test(pType)) {
-          query.propertyType = { $regex: /builder|floor/i };
-        } else if (/villa/i.test(pType)) {
-          query.propertyType = { $regex: /villa/i };
+        const dbPropertyTypes = [
+          "Agricultural Land", "Apartment / Flat", "Builder / New Project", "Builder Floor",
+          "Commercial Space", "Hotel / Resort", "Independent House", "Industrial Property",
+          "Office Space", "PG / Hostel", "Plot / Land", "Residential Plot", "Shop / Retail",
+          "Villa", "Warehouse"
+        ];
+
+        const exactType = dbPropertyTypes.find(t => t.toLowerCase() === pTypeLower);
+        if (exactType) {
+          query.propertyType = exactType;
         } else {
-          query.propertyType = { $regex: new RegExp(pType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+          // Fallback to grouped/partial logic
+          if (/apartment|flat/i.test(pType)) {
+            query.propertyType = { $regex: /apartment|flat/i };
+          } else if (/house|independent/i.test(pType)) {
+            query.propertyType = { $regex: /house|independent/i };
+          } else if (/plot|land/i.test(pType)) {
+            if (pTypeLower === "plot" || pTypeLower === "plot / land" || pTypeLower === "residential plot") {
+              query.propertyType = { $in: ["Plot / Land", "Residential Plot"] };
+            } else {
+              query.propertyType = { $regex: /plot|land/i };
+            }
+          } else if (/commercial/i.test(pType)) {
+            query.propertyType = { $in: commercialTypes };
+          } else if (/builder|floor/i.test(pType)) {
+            query.propertyType = { $regex: /builder|floor/i };
+          } else if (/villa/i.test(pType)) {
+            query.propertyType = { $regex: /villa/i };
+          } else {
+            query.propertyType = { $regex: new RegExp(pType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+          }
         }
       }
     }
@@ -1204,6 +1299,15 @@ exports.updateProperty = async (req, res) => {
         console.error("Failed to parse documents:", err);
       }
     }
+    if (req.body.agreementDetails) {
+      try {
+        if (typeof req.body.agreementDetails === "string") {
+          req.body.agreementDetails = JSON.parse(req.body.agreementDetails);
+        }
+      } catch (err) {
+        console.error("Failed to parse agreementDetails:", err);
+      }
+    }
 
     const cleanedData = cleanPropertyDetails(req.body.propertyType || property.propertyType, req.body);
 
@@ -1726,6 +1830,9 @@ exports.updatePropertyDraft = async (req, res) => {
     if (req.body.documents && typeof req.body.documents === "string") {
       try { req.body.documents = JSON.parse(req.body.documents); } catch (e) { }
     }
+    if (req.body.agreementDetails && typeof req.body.agreementDetails === "string") {
+      try { req.body.agreementDetails = JSON.parse(req.body.agreementDetails); } catch (e) { }
+    }
     if (req.body.marketInsight && typeof req.body.marketInsight === "string") {
       try { req.body.marketInsight = JSON.parse(req.body.marketInsight); } catch (e) { }
     }
@@ -1740,6 +1847,7 @@ exports.updatePropertyDraft = async (req, res) => {
     if (req.body.neighbourhood) draft.neighbourhood = req.body.neighbourhood;
     if (req.body.pendingIssues) draft.pendingIssues = req.body.pendingIssues;
     if (req.body.documents) draft.documents = req.body.documents;
+    if (req.body.agreementDetails) draft.agreementDetails = req.body.agreementDetails;
     if (req.body.marketInsight) draft.marketInsight = req.body.marketInsight;
 
     await draft.save();
@@ -1802,5 +1910,455 @@ exports.deletePropertyDraft = async (req, res) => {
       success: false,
       message: err.message,
     });
+  }
+};
+
+exports.updatePropertyStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const requestedStatus = req.body.availabilityStatus || req.body.status;
+    const allowedStatuses = ["on_sale", "hold", "sold", "rented"];
+
+    if (!requestedStatus || !allowedStatuses.includes(requestedStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid status value. Allowed values: on_sale, hold, sold, rented",
+      });
+    }
+
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        message: "Property not found",
+      });
+    }
+
+    const userId = (req.user?._id || req.user?.id || "").toString();
+    const createdBy = (property.createdBy || "").toString();
+    const ownerId = (property.ownerId || "").toString();
+    const isAdmin = req.user?.role === "admin";
+
+    if (!isAdmin && userId !== createdBy && userId !== ownerId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are only authorized to change the status of properties you own.",
+      });
+    }
+
+    property.availabilityStatus = requestedStatus;
+    await property.save();
+
+    let displayStatus = "On Sale";
+    if (requestedStatus === "hold") displayStatus = "On Hold";
+    if (requestedStatus === "sold") displayStatus = "Sold";
+    if (requestedStatus === "rented") displayStatus = "Rented";
+
+    return res.status(200).json({
+      success: true,
+      message: `Property status updated to ${displayStatus}.`,
+      data: property,
+    });
+  } catch (err) {
+    console.error("Error in updatePropertyStatus:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Failed to update property status",
+    });
+  }
+};
+
+exports.getNewProjects = async (req, res) => {
+  try {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 12;
+    const skip = (page - 1) * limit;
+
+    const {
+      search,
+      purpose,
+      city,
+      locality,
+      propertyType,
+      bedrooms,
+      minPrice,
+      maxPrice,
+      constructionStatus,
+      sort,
+    } = req.query;
+
+    // Base query for public eligible new project properties
+    // Primary eligibility:
+    // 1. Construction Status = Under Construction / New Launch / Near Completion
+    // OR 2. Property Age <= 1 Year (e.g. 0-1 Year Old)
+    // Strictly excludes properties with Property Age > 1 Year (1-5 Years, 5-10 Years, 10+ Years).
+    const query = {
+      isDeleted: { $ne: true },
+      status: { $in: ["approved", "active", "published"] },
+      availabilityStatus: { $ne: "sold" },
+      $and: [
+        {
+          $or: [
+            { constructionStatus: { $regex: /under construction|new launch|near completion/i } },
+            { propertyAge: { $regex: /0-1|0|1|under 1|new|less than 1/i } }
+          ]
+        },
+        {
+          propertyAge: { $not: /1-5|5-10|10\+|1-3|3-5|older|resale/i }
+        }
+      ]
+    };
+
+    // Purpose filter (supports Sale, Rent, Lease, PG / Co-Living)
+    if (purpose && purpose.trim() !== "") {
+      const purpTrim = purpose.trim().toLowerCase();
+      if (purpTrim === "pg_co_living" || purpTrim === "pg / co-living" || purpTrim === "pg" || purpTrim === "co-living" || purpTrim === "pg_coliving") {
+        query.purpose = { $regex: /pg|co-living|pg_co_living/i };
+      } else if (purpTrim === "rent" || purpTrim === "for rent") {
+        query.purpose = { $regex: /^rent$|^for rent$/i };
+      } else if (purpTrim === "lease" || purpTrim === "for lease") {
+        query.purpose = { $regex: /^lease$|^for lease$/i };
+      } else if (purpTrim === "buy" || purpTrim === "sale" || purpTrim === "sell" || purpTrim === "for sale") {
+        query.purpose = { $regex: /^sale$|^buy$|^sell$|^for sale$/i };
+      } else {
+        query.purpose = { $regex: new RegExp(purpose.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+      }
+    }
+
+    // City
+    if (city && city.trim() !== "") {
+      query.city = { $regex: new RegExp(city.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+    }
+
+    // Locality
+    if (locality && locality.trim() !== "") {
+      query.locality = { $regex: new RegExp(locality.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+    }
+
+    // Property Type
+    if (propertyType && propertyType.trim() !== "") {
+      const pType = propertyType.trim();
+      if (/apartment|flat/i.test(pType)) {
+        query.propertyType = { $regex: /apartment|flat/i };
+      } else if (/house|independent/i.test(pType)) {
+        query.propertyType = { $regex: /house|independent/i };
+      } else if (/plot|land/i.test(pType)) {
+        query.propertyType = { $regex: /plot|land/i };
+      } else if (/commercial/i.test(pType)) {
+        query.propertyType = {
+          $in: [
+            "Commercial Space", "Office Space", "Shop / Retail", "Warehouse", "Industrial Property", "Hotel / Resort"
+          ]
+        };
+      } else if (/villa/i.test(pType)) {
+        query.propertyType = { $regex: /villa/i };
+      } else {
+        query.propertyType = { $regex: new RegExp(pType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+      }
+    }
+
+    // Bedrooms
+    if (bedrooms && bedrooms.trim() !== "") {
+      const bNum = Number(bedrooms);
+      if (bNum >= 5) {
+        query.bedrooms = { $gte: 5 };
+      } else if (!isNaN(bNum) && bNum > 0) {
+        query.bedrooms = bNum;
+      }
+    }
+
+    // Construction Status filter override
+    if (constructionStatus && constructionStatus.trim() !== "") {
+      query.constructionStatus = { $regex: new RegExp(constructionStatus.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+    }
+
+    // Price Filter
+    if (minPrice || maxPrice) {
+      query.price = {};
+      if (minPrice && !isNaN(Number(minPrice))) {
+        query.price.$gte = Number(minPrice);
+      }
+      if (maxPrice && !isNaN(Number(maxPrice))) {
+        query.price.$lte = Number(maxPrice);
+      }
+    }
+
+    // Search query
+    if (search && search.trim() !== "") {
+      const cleanSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      query.$or = [
+        { city: { $regex: cleanSearch, $options: "i" } },
+        { locality: { $regex: cleanSearch, $options: "i" } },
+        { society: { $regex: cleanSearch, $options: "i" } },
+        { address: { $regex: cleanSearch, $options: "i" } },
+        { propertyType: { $regex: cleanSearch, $options: "i" } },
+        { projectName: { $regex: cleanSearch, $options: "i" } },
+      ];
+    }
+
+    // Sorting
+    let sortOption = { createdAt: -1 };
+    if (sort === "priceLowToHigh") sortOption = { price: 1 };
+    if (sort === "priceHighToLow") sortOption = { price: -1 };
+    if (sort === "oldest") sortOption = { createdAt: 1 };
+
+    const totalProperties = await Property.countDocuments(query);
+    const docs = await Property.find(query)
+      .populate("createdBy", "fullName email phone role agencyName")
+      .sort(sortOption)
+      .skip(skip)
+      .limit(limit);
+
+    const properties = docs.map((p) => sanitizePropertyData(p.toObject(), req));
+
+    return res.status(200).json({
+      success: true,
+      data: properties,
+      pagination: {
+        page,
+        limit,
+        totalProperties,
+        totalPages: Math.ceil(totalProperties / limit) || 1,
+        hasNext: page < Math.ceil(totalProperties / limit),
+        hasPrevious: page > 1,
+      },
+    });
+  } catch (err) {
+    console.error("Error in getNewProjects:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Failed to fetch new projects",
+    });
+  }
+};
+
+// Add PG Room
+exports.addPgRoom = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: "Property not found" });
+    }
+    const userIdStr = (req.user._id || req.user.id || "").toString();
+    const createdByStr = (property.createdBy || "").toString();
+    const ownerIdStr = (property.ownerId || "").toString();
+    if (userIdStr !== createdByStr && userIdStr !== ownerIdStr && req.user.role !== "admin") {
+      return res.status(403).json({ success: false, message: "Unauthorized" });
+    }
+    if (!property.pgDetails) {
+      property.pgDetails = { rooms: [] };
+    }
+    if (!property.pgDetails.rooms) {
+      property.pgDetails.rooms = [];
+    }
+
+    const {
+      roomType, sharingType, totalBeds, occupiedBeds, reservedBeds,
+      pricePerPerson, securityDeposit, bathroomType, ac, furnishing, description, images
+    } = req.body;
+
+    const tot = Number(totalBeds) || 0;
+    const occ = Number(occupiedBeds) || 0;
+    const resv = Number(reservedBeds) || 0;
+    if (tot <= 0) {
+      return res.status(400).json({ success: false, message: "Total beds must be greater than 0" });
+    }
+    if (occ > tot) {
+      return res.status(400).json({ success: false, message: "Occupied beds cannot be greater than total beds" });
+    }
+    const avail = Math.max(0, tot - occ - resv);
+    let status = "AVAILABLE";
+    if (avail === 0) status = "FULL";
+    else if (occ > 0) status = "PARTIALLY_AVAILABLE";
+
+    const newRoom = {
+      roomId: `room_${Date.now()}`,
+      roomType: roomType || "Single Sharing",
+      sharingType: sharingType || roomType || "Single Sharing",
+      totalBeds: tot,
+      occupiedBeds: occ,
+      reservedBeds: resv,
+      availableBeds: avail,
+      pricePerPerson: Number(pricePerPerson) || 0,
+      securityDeposit: Number(securityDeposit) || 0,
+      bathroomType: bathroomType || "Attached",
+      ac: Boolean(ac),
+      furnishing: furnishing || "Fully Furnished",
+      description: description || "",
+      images: images || [],
+      status,
+    };
+
+    property.pgDetails.rooms.push(newRoom);
+    await property.save();
+
+    return res.status(201).json({
+      success: true,
+      message: "Room added successfully",
+      data: property.pgDetails.rooms,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Update PG Room Configuration
+exports.updatePgRoom = async (req, res) => {
+  try {
+    const { id, roomId } = req.params;
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: "Property not found" });
+    }
+    const userIdStr = (req.user._id || req.user.id || "").toString();
+    const createdByStr = (property.createdBy || "").toString();
+    const ownerIdStr = (property.ownerId || "").toString();
+    if (userIdStr !== createdByStr && userIdStr !== ownerIdStr && req.user.role !== "admin") {
+      return res.status(403).json({ success: false, message: "Unauthorized" });
+    }
+
+    if (!property.pgDetails || !property.pgDetails.rooms) {
+      return res.status(404).json({ success: false, message: "No rooms found" });
+    }
+
+    const roomIndex = property.pgDetails.rooms.findIndex((r) => r.roomId === roomId || r._id?.toString() === roomId);
+    if (roomIndex === -1) {
+      return res.status(404).json({ success: false, message: "Room not found" });
+    }
+
+    const target = property.pgDetails.rooms[roomIndex];
+    const tot = req.body.totalBeds !== undefined ? Number(req.body.totalBeds) : target.totalBeds;
+    const occ = req.body.occupiedBeds !== undefined ? Number(req.body.occupiedBeds) : target.occupiedBeds;
+    const resv = req.body.reservedBeds !== undefined ? Number(req.body.reservedBeds) : (target.reservedBeds || 0);
+
+    if (tot <= 0) {
+      return res.status(400).json({ success: false, message: "Total beds must be greater than 0" });
+    }
+    if (occ > tot) {
+      return res.status(400).json({ success: false, message: "Occupied beds cannot be greater than total beds" });
+    }
+
+    const avail = Math.max(0, tot - occ - resv);
+    let status = req.body.status || target.status;
+    if (avail === 0) status = "FULL";
+    else if (occ > 0 && status !== "BLOCKED") status = "PARTIALLY_AVAILABLE";
+    else if (occ === 0 && status !== "BLOCKED") status = "AVAILABLE";
+
+    property.pgDetails.rooms[roomIndex] = {
+      ...(target.toObject ? target.toObject() : target),
+      ...req.body,
+      totalBeds: tot,
+      occupiedBeds: occ,
+      reservedBeds: resv,
+      availableBeds: avail,
+      status,
+    };
+
+    await property.save();
+    return res.status(200).json({
+      success: true,
+      message: "Room updated successfully",
+      data: property.pgDetails.rooms[roomIndex],
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Update PG Room Availability (Occupied beds, available beds, status)
+exports.updatePgRoomAvailability = async (req, res) => {
+  try {
+    const { id, roomId } = req.params;
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: "Property not found" });
+    }
+    const userIdStr = (req.user._id || req.user.id || "").toString();
+    const createdByStr = (property.createdBy || "").toString();
+    const ownerIdStr = (property.ownerId || "").toString();
+    if (userIdStr !== createdByStr && userIdStr !== ownerIdStr && req.user.role !== "admin") {
+      return res.status(403).json({ success: false, message: "Unauthorized" });
+    }
+
+    if (!property.pgDetails || !property.pgDetails.rooms) {
+      return res.status(404).json({ success: false, message: "No rooms found" });
+    }
+
+    const roomIndex = property.pgDetails.rooms.findIndex((r) => r.roomId === roomId || r._id?.toString() === roomId);
+    if (roomIndex === -1) {
+      return res.status(404).json({ success: false, message: "Room not found" });
+    }
+
+    const target = property.pgDetails.rooms[roomIndex];
+    let occ = target.occupiedBeds;
+    let resv = target.reservedBeds || 0;
+
+    if (req.body.occupiedBeds !== undefined) {
+      occ = Number(req.body.occupiedBeds);
+    }
+    if (req.body.reservedBeds !== undefined) {
+      resv = Number(req.body.reservedBeds);
+    }
+
+    if (occ < 0) {
+      return res.status(400).json({ success: false, message: "Occupied beds cannot be negative" });
+    }
+    if (occ > target.totalBeds) {
+      return res.status(400).json({ success: false, message: "Occupied beds cannot exceed total beds" });
+    }
+
+    const avail = Math.max(0, target.totalBeds - occ - resv);
+    let status = req.body.status || target.status;
+    if (avail === 0) status = "FULL";
+    else if (occ > 0 && status !== "BLOCKED") status = "PARTIALLY_AVAILABLE";
+    else if (occ === 0 && status !== "BLOCKED") status = "AVAILABLE";
+
+    property.pgDetails.rooms[roomIndex].occupiedBeds = occ;
+    property.pgDetails.rooms[roomIndex].reservedBeds = resv;
+    property.pgDetails.rooms[roomIndex].availableBeds = avail;
+    property.pgDetails.rooms[roomIndex].status = status;
+
+    await property.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Room availability updated",
+      data: property.pgDetails.rooms[roomIndex],
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Delete PG Room
+exports.deletePgRoom = async (req, res) => {
+  try {
+    const { id, roomId } = req.params;
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: "Property not found" });
+    }
+    const userIdStr = (req.user._id || req.user.id || "").toString();
+    const createdByStr = (property.createdBy || "").toString();
+    const ownerIdStr = (property.ownerId || "").toString();
+    if (userIdStr !== createdByStr && userIdStr !== ownerIdStr && req.user.role !== "admin") {
+      return res.status(403).json({ success: false, message: "Unauthorized" });
+    }
+
+    if (!property.pgDetails || !property.pgDetails.rooms) {
+      return res.status(404).json({ success: false, message: "No rooms found" });
+    }
+
+    property.pgDetails.rooms = property.pgDetails.rooms.filter((r) => r.roomId !== roomId && r._id?.toString() !== roomId);
+    await property.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Room removed successfully",
+      data: property.pgDetails.rooms,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
   }
 };

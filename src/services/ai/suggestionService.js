@@ -34,7 +34,10 @@ const generateFallbackSuggestions = (p) => {
   ];
 
   // 3. Buyer Profile
-  const buyerProfile = p.purpose === "Rent" ? "Ideal for working professionals or young families." : "Perfect for long-term investors or self-occupation.";
+  const isRentalOrLease = p.purpose === "Rent" || p.purpose === "Lease";
+  const buyerProfile = isRentalOrLease
+    ? "Ideal for tenants, working professionals, or businesses seeking long-term placement."
+    : "Perfect for long-term investors or self-occupation.";
 
   return {
     success: true,

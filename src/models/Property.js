@@ -3,6 +3,11 @@ const mongoose = require("mongoose");
 const propertySchema =
   new mongoose.Schema(
     {
+      title: String,
+      isDraft: {
+        type: Boolean,
+        default: false,
+      },
       purpose: {
         type: String,
         required: true,
@@ -163,8 +168,65 @@ const propertySchema =
       availableUnits: Number,
       bhkTypes: String,
       constructionStatus: String,
-      possessionDate: Date,
       paymentPlan: String,
+
+      pgDetails: {
+        pgName: String,
+        publisherType: String,
+        accommodationType: String,
+        suitableFor: String,
+        occupantType: String,
+        moveInAvailability: String,
+        moveInDate: Date,
+        foodAvailability: String,
+        mealsIncluded: [String],
+        furnishing: String,
+        rooms: [
+          {
+            roomId: String,
+            roomType: String,
+            sharingType: String,
+            roomCount: { type: Number, default: 1 },
+            totalBeds: { type: Number, default: 0 },
+            occupiedBeds: { type: Number, default: 0 },
+            reservedBeds: { type: Number, default: 0 },
+            availableBeds: { type: Number, default: 0 },
+            pricePerPerson: { type: Number, default: 0 },
+            securityDeposit: { type: Number, default: 0 },
+            bathroomType: String,
+            ac: Boolean,
+            furnishing: String,
+            description: String,
+            images: [String],
+            status: {
+              type: String,
+              enum: ["AVAILABLE", "PARTIALLY_AVAILABLE", "FULL", "BLOCKED", "UNAVAILABLE"],
+              default: "AVAILABLE",
+            },
+          },
+        ],
+        facilities: [String],
+        rules: {
+          visitorPolicy: String,
+          curfew: String,
+          smokingAllowed: Boolean,
+          alcoholAllowed: Boolean,
+          petsAllowed: Boolean,
+          cookingAllowed: Boolean,
+          noticePeriod: String,
+          lockInPeriod: String,
+          guestPolicy: String,
+          otherRules: String,
+        },
+        charges: {
+          securityDeposit: Number,
+          maintenanceCharges: Number,
+          electricityCharges: String,
+          wifiCharges: String,
+          foodCharges: Number,
+          otherCharges: String,
+        },
+      },
 
       amenities: [String],
 
@@ -308,7 +370,7 @@ const propertySchema =
 
       availabilityStatus: {
         type: String,
-        enum: ["on_sale", "hold", "sold"],
+        enum: ["on_sale", "hold", "sold", "rented"],
         default: "on_sale",
       },
 
@@ -409,7 +471,23 @@ const propertySchema =
           remarks: String,
           expiryDate: Date,
         }
-      ]
+      ],
+      agreementDetails: {
+        agreementType: { type: String, default: "" },
+        amount: { type: Number, default: 0 },
+        advanceAmount: { type: Number, default: 0 },
+        securityDeposit: { type: Number, default: 0 },
+        duration: { type: String, default: "" },
+        startDate: { type: Date, default: null },
+        noticePeriod: { type: String, default: "" },
+        lockInPeriod: { type: String, default: "" },
+        rentEscalation: { type: String, default: "" },
+        maintenanceResponsibility: { type: String, default: "" },
+        utilitiesResponsibility: { type: String, default: "" },
+        parkingDetails: { type: String, default: "" },
+        furnishingCondition: { type: String, default: "" },
+        additionalTerms: { type: String, default: "" },
+      }
     },
     {
       timestamps: true,

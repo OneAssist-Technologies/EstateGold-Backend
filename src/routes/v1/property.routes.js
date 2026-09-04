@@ -6,6 +6,7 @@ const router = express.Router();
 const {
   createProperty,
   getProperties,
+  getNewProjects,
   getPropertiesCompare,
   getPropertyById,
   getSimilarProperties,
@@ -25,13 +26,35 @@ const {
   getPublicSettings,
 } = require("../../controllers/propertyController");
 
+const {
+  downloadTemplate,
+  validateBulkUpload,
+  publishBulkProperties,
+  downloadErrorReport,
+} = require("../../controllers/bulkPropertyController");
+
 const auth = require("../../../middleware/authMiddleware");
 const upload = require("../../../middleware/upload");
+
+// ─── Bulk Upload Routes ───
+const bulkUploadMiddleware = upload.fields([
+  { name: "excelFile", maxCount: 1 },
+  { name: "zipFile", maxCount: 1 },
+  { name: "file", maxCount: 1 },
+]);
+
+router.get("/bulk-upload/template", downloadTemplate);
+router.post("/bulk-upload/validate", auth, bulkUploadMiddleware, validateBulkUpload);
+router.post("/bulk-upload/publish", auth, bulkUploadMiddleware, publishBulkProperties);
+router.post("/bulk-upload/error-report", auth, downloadErrorReport);
 
 // ─── Public property routes ───
 
 // GET /api/v1/properties — List properties (with query filters)
 router.get("/", getProperties);
+
+// GET /api/v1/properties/new-projects — List new projects
+router.get("/new-projects", getNewProjects);
 
 // GET /api/v1/properties/compare — Compare properties
 router.get("/compare", getPropertiesCompare);
@@ -76,7 +99,7 @@ router.patch("/:id/approve", approveProperty);
 router.patch("/:id/reject", rejectProperty);
 
 // PATCH /api/v1/properties/:id/status — Update status
-router.patch("/:id/status", updatePropertyStatus);
+router.patch("/:id/status", auth, updatePropertyStatus);
 
 // PATCH /api/v1/properties/:id/request-delete — Request deletion
 router.patch("/:id/request-delete", auth, requestDelete);

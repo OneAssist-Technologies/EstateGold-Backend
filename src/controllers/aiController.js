@@ -4,6 +4,7 @@ const comparisonService = require("../services/ai/comparisonService");
 const healthScoreService = require("../services/ai/healthScoreService");
 const suggestionService = require("../services/ai/suggestionService");
 const matchScoreService = require("../services/ai/matchScoreService");
+const propertyTipsService = require("../services/ai/propertyTipsService");
 
 // 1. On-demand AI Description Generation
 exports.generateDescription = async (req, res) => {
@@ -144,6 +145,20 @@ exports.getPropertyHighlights = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || "Failed to generate property highlights.",
+    });
+  }
+};
+
+// 4b. Eyva Property Publish Tips & Recommendations
+exports.getPropertyTips = async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const result = await propertyTipsService.generatePropertyTips(payload);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to generate property tips.",
     });
   }
 };

@@ -30,7 +30,7 @@ const marketInsightRoutes = require("./market-insight.routes");
 const adminRoutes = require("./admin.routes");
 const createHealthRouter = require("../healthRoutes");
 
-const { getPublicSettings } = require("../../controllers/propertyController");
+const { getPublicSettings, getNewProjects } = require("../../controllers/propertyController");
 
 // Mount sub-routers
 router.use("/auth", authRoutes);
@@ -43,7 +43,8 @@ router.use("/ai", aiRoutes);
 router.use("/market-insights", marketInsightRoutes);
 router.use("/admin", adminRoutes);
 
-// Public settings
+// Public settings & new projects
 router.get("/settings", getPublicSettings);
+router.get("/new-projects", getNewProjects);
 
 module.exports = router;

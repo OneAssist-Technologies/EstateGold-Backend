@@ -41,7 +41,13 @@ Only include facts present in the inputs. Do NOT invent landmarks, specific trav
 5. PROFESSIONAL & RESTRAINED TONE:
 Keep the tone clear, informative, trustworthy, and buyer-friendly. Avoid over-hyped marketing jargon (like "dream home", "luxury beyond imagination", "once-in-a-lifetime deal") unless directly supported by high-end property specifications.
 
-Do NOT output any markdown blocks (like \`\`\`json) in your response. Return ONLY raw JSON.
+6. STRICT COMPLIANCE WITH LISTING PURPOSE:
+Pay strict attention to "Listing Purpose":
+- If Listing Purpose is "Lease", state clearly that the property is "available for lease" or "offered on lease". NEVER describe a lease listing as "available for sale"!
+- If Listing Purpose is "Rent", state clearly that the property is "available for rent" / "offered for rent".
+- If Listing Purpose is "Sale", state clearly that the property is "available for sale" / "listed for sale".
+
+Do NOT output any markdown code blocks in your response. Return ONLY raw JSON.
 `;
 
 const userPrompt = (property) => {

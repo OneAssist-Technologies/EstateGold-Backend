@@ -5,6 +5,7 @@ const fs = require("fs");
 const {
   createProperty,
   getProperties,
+  getNewProjects,
   getPropertiesCompare,
   getPropertyById,
   getSimilarProperties,
@@ -23,7 +24,18 @@ const {
   updatePropertyDraft,
   getPropertyDraft,
   deletePropertyDraft,
+  addPgRoom,
+  updatePgRoom,
+  updatePgRoomAvailability,
+  deletePgRoom,
 } = require("../controllers/propertyController");
+
+const {
+  downloadTemplate,
+  validateBulkUpload,
+  publishBulkProperties,
+  downloadErrorReport,
+} = require("../controllers/bulkPropertyController");
 
 const upload=
   require(
@@ -36,6 +48,25 @@ const upload=
 
 const router =
   express.Router();
+
+// Bulk Upload Endpoints
+const bulkUploadMiddleware = upload.fields([
+  { name: "excelFile", maxCount: 1 },
+  { name: "zipFile", maxCount: 1 },
+  { name: "file", maxCount: 1 },
+]);
+
+router.get("/bulk-upload/template", downloadTemplate);
+router.get("/api/properties/bulk-upload/template", downloadTemplate);
+router.post("/bulk-upload/validate", auth, bulkUploadMiddleware, validateBulkUpload);
+router.post("/api/properties/bulk-upload/validate", auth, bulkUploadMiddleware, validateBulkUpload);
+router.post("/bulk-upload/publish", auth, bulkUploadMiddleware, publishBulkProperties);
+router.post("/api/properties/bulk-upload/publish", auth, bulkUploadMiddleware, publishBulkProperties);
+router.post("/bulk-upload/error-report", auth, downloadErrorReport);
+router.post("/api/properties/bulk-upload/error-report", auth, downloadErrorReport);
+
+router.get("/new-projects", getNewProjects);
+router.get("/properties/new-projects", getNewProjects);
 
 router.get("/settings", getPublicSettings);
 router.get("/api/settings", getPublicSettings);
@@ -141,6 +172,8 @@ router.get(
   auth,
   getMyProperties
 );
+router.get("/properties/mine", auth, getMyProperties);
+router.get("/properties/mine/:userId", auth, getMyProperties);
 
 router.get(
   "/search-properties",
@@ -181,4 +214,15 @@ router.patch(
   "/properties/:id/status",
   updatePropertyStatus
 );
+
+// PG / Co-Living Room Management Endpoints
+router.post("/properties/:id/rooms", auth, addPgRoom);
+router.post("/api/properties/:id/rooms", auth, addPgRoom);
+router.put("/properties/:id/rooms/:roomId", auth, updatePgRoom);
+router.put("/api/properties/:id/rooms/:roomId", auth, updatePgRoom);
+router.put("/properties/:id/rooms/:roomId/availability", auth, updatePgRoomAvailability);
+router.put("/api/properties/:id/rooms/:roomId/availability", auth, updatePgRoomAvailability);
+router.delete("/properties/:id/rooms/:roomId", auth, deletePgRoom);
+router.delete("/api/properties/:id/rooms/:roomId", auth, deletePgRoom);
+
 module.exports = router;

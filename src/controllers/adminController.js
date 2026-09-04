@@ -61,10 +61,22 @@ exports.getDashboard = async (req, res) => {
     }
 
     // Pending properties for quick approval card
-    const pendingProperties = await Property.find({ isDeleted: false, status: "pending" })
+    const pendingPropertiesDocs = await Property.find({ isDeleted: false, status: "pending" })
       .populate("createdBy", "fullName email phone role agencyName")
       .sort({ createdAt: -1 })
       .limit(5);
+
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const pendingProperties = pendingPropertiesDocs.map((prop) => {
+      const p = prop.toObject();
+      p.photos = (p.photos || []).map((photo) => {
+        if (!photo) return "";
+        if (photo.startsWith("http://") || photo.startsWith("https://")) return photo;
+        const clean = photo.replace(/^\/+/, "").replace(/^uploads\/properties\//, "").replace(/^uploads\//, "");
+        return `${baseUrl}/uploads/properties/${clean}`;
+      });
+      return p;
+    });
 
     res.json({
       success: true,
@@ -368,12 +380,12 @@ exports.deleteProperty = async (req, res) => {
 exports.updatePropertyAvailabilityStatus = async (req, res) => {
   try {
     const { availabilityStatus } = req.body;
-    const allowedStatuses = ["on_sale", "hold", "sold"];
+    const allowedStatuses = ["on_sale", "hold", "sold", "rented"];
 
     if (!availabilityStatus || !allowedStatuses.includes(availabilityStatus)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid status value. Allowed values: on_sale, hold, sold",
+        message: "Invalid status value. Allowed values: on_sale, hold, sold, rented",
       });
     }
 
@@ -683,14 +695,13 @@ exports.getAnalytics = async (req, res) => {
       } else {
         entry.added++;
         const purposeLower = (p.purpose || "").toLowerCase();
-        const isRent = purposeLower.includes("rent") || purposeLower.includes("lease");
+        const propertyTypeLower = (p.propertyType || "").toLowerCase();
+        const isRent = /rent|lease|pg|coliving|hostel/i.test(purposeLower) || /pg|hostel/i.test(propertyTypeLower);
 
-        if (p.availabilityStatus === "sold" || p.availabilityStatus === "hold") {
-          if (isRent) {
-            entry.rented++;
-          } else {
-            entry.sold++;
-          }
+        if (p.availabilityStatus === "rented" || ((p.availabilityStatus === "sold" || p.availabilityStatus === "hold") && isRent)) {
+          entry.rented++;
+        } else if (p.availabilityStatus === "sold" || p.availabilityStatus === "hold") {
+          entry.sold++;
         }
       }
     });
@@ -747,7 +758,7 @@ exports.getAnalytics = async (req, res) => {
       const soldInCity = await Property.countDocuments({
         isDeleted: false,
         status: "approved",
-        availabilityStatus: "sold",
+        availabilityStatus: { $in: ["sold", "rented"] },
         $or: [{ serviceableAreaId: loc._id }, { city: { $regex: new RegExp(`^${loc.city}$`, "i") } }],
       });
 
@@ -777,20 +788,29 @@ exports.getAnalytics = async (req, res) => {
     ];
 
     // 6. Buy vs Rent (Overall Breakdown)
-    const buyCount = await Property.countDocuments({
-      isDeleted: false,
-      purpose: { $regex: /buy|sale|sell/i },
-    });
-
     const rentCount = await Property.countDocuments({
       isDeleted: false,
-      purpose: { $regex: /rent|lease/i },
+      status: { $ne: "draft" },
+      $or: [
+        { purpose: { $regex: /rent|lease|pg|coliving|hostel/i } },
+        { propertyType: { $regex: /pg|hostel/i } },
+      ],
+    });
+
+    const buyCount = await Property.countDocuments({
+      isDeleted: false,
+      status: { $ne: "draft" },
+      $or: [
+        { purpose: { $regex: /buy|sale|sell/i } },
+        { purpose: { $exists: false } },
+        { purpose: "" },
+      ],
     });
 
     const totalBuyRent = (buyCount + rentCount) || 1;
     const buyVsRent = [
-      { name: "For Buy", count: buyCount, percentage: totalProperties > 0 ? Math.round((buyCount / totalBuyRent) * 100) : 0, color: "#E5C365" },
-      { name: "For Rent", count: rentCount, percentage: totalProperties > 0 ? Math.round((rentCount / totalBuyRent) * 100) : 0, color: "#10B981" },
+      { name: "For Buy", count: buyCount, percentage: Math.round((buyCount / totalBuyRent) * 100), color: "#E5C365" },
+      { name: "For Rent", count: rentCount, percentage: Math.round((rentCount / totalBuyRent) * 100), color: "#10B981" },
     ];
 
     // 7. Recent Activity
@@ -829,6 +849,7 @@ exports.getAnalytics = async (req, res) => {
 
       const sold = await Property.countDocuments({
         isDeleted: false,
+        status: { $ne: "draft" },
         availabilityStatus: "sold",
         purpose: { $regex: /buy|sale|sell/i },
         updatedAt: { $gte: d, $lt: nextMonth },
@@ -836,8 +857,17 @@ exports.getAnalytics = async (req, res) => {
 
       const rented = await Property.countDocuments({
         isDeleted: false,
-        availabilityStatus: "sold",
-        purpose: { $regex: /rent|lease/i },
+        status: { $ne: "draft" },
+        $or: [
+          { availabilityStatus: "rented" },
+          {
+            availabilityStatus: { $in: ["sold", "hold"] },
+            $or: [
+              { purpose: { $regex: /rent|lease|pg|coliving|hostel/i } },
+              { propertyType: { $regex: /pg|hostel/i } },
+            ],
+          },
+        ],
         updatedAt: { $gte: d, $lt: nextMonth },
       });
 

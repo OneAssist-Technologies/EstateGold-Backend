@@ -24,25 +24,37 @@ const calculatePropertyMatchScore = (property, preferences = {}, weights = DEFAU
 
   const cleanStr = (val) => String(val || "").trim().toLowerCase();
 
-  // 1. Purpose (Buy / Rent)
+  const isPgPurpose = (p) => ["pg", "pg_co_living", "pg / co-living", "co-living", "pg_coliving", "pg/co-living"].includes(cleanStr(p));
+  const isRentPurpose = (p) => ["rent", "for rent"].includes(cleanStr(p));
+  const isSalePurpose = (p) => ["sale", "buy", "sell", "for sale"].includes(cleanStr(p));
+  const isLeasePurpose = (p) => ["lease", "for lease"].includes(cleanStr(p));
+
+  const purpLower = cleanStr(property.purpose);
+  const isPgProperty =
+    isPgPurpose(purpLower) ||
+    Boolean(property.pgDetails?.pgName || (property.pgDetails?.rooms || []).length > 0);
+
+  // 1. Purpose (Buy / Rent / Lease / PG)
   if (preferences.purpose && cleanStr(preferences.purpose)) {
     const prefPurpose = cleanStr(preferences.purpose);
-    const propPurpose = cleanStr(property.purpose);
+    const propPurpose = cleanStr(property.purpose || (isPgProperty ? "PG / Co-Living" : ""));
 
-    if (!property.purpose) {
+    if (!property.purpose && !isPgProperty) {
       unverifiedReasons.push("Listing purpose");
     } else {
       totalPossiblePoints += weights.purpose;
-      const isPurposeMatch = 
-        propPurpose === prefPurpose || 
-        (prefPurpose === "buy" && propPurpose === "sale") ||
-        (prefPurpose === "sale" && propPurpose === "buy");
+      const isPurposeMatch =
+        propPurpose === prefPurpose ||
+        (isPgPurpose(prefPurpose) && isPgProperty) ||
+        (isRentPurpose(prefPurpose) && isRentPurpose(propPurpose)) ||
+        (isSalePurpose(prefPurpose) && isSalePurpose(propPurpose)) ||
+        (isLeasePurpose(prefPurpose) && isLeasePurpose(propPurpose));
 
       if (isPurposeMatch) {
         totalMatchedPoints += weights.purpose;
-        matchedReasons.push(`Matches preferred purpose (${preferences.purpose})`);
+        matchedReasons.push(`Matches preferred purpose (${isPgProperty ? "PG / Co-Living" : (property.purpose || preferences.purpose)})`);
       } else {
-        mismatchedReasons.push(`✕ Purpose mismatch (expected ${preferences.purpose}, got ${property.purpose})`);
+        mismatchedReasons.push(`✕ Purpose mismatch (expected ${preferences.purpose}, got ${property.purpose || "N/A"})`);
       }
     }
   }
@@ -56,7 +68,24 @@ const calculatePropertyMatchScore = (property, preferences = {}, weights = DEFAU
       unverifiedReasons.push("Property type");
     } else {
       totalPossiblePoints += weights.propertyType;
-      if (propType === prefType) {
+
+      const isApartment = (t) => t.includes("apartment") || t.includes("flat");
+      const isHouse = (t) => t.includes("house") || t.includes("independent");
+      const isVilla = (t) => t.includes("villa");
+      const isPlot = (t) => t.includes("plot") || t.includes("land");
+      const isCommercial = (t) => t.includes("commercial") || t.includes("office") || t.includes("shop");
+      const isPgType = (t) => t.includes("pg") || t.includes("hostel");
+
+      const isTypeMatch =
+        propType === prefType ||
+        (isApartment(prefType) && isApartment(propType)) ||
+        (isHouse(prefType) && isHouse(propType)) ||
+        (isVilla(prefType) && isVilla(propType)) ||
+        (isPlot(prefType) && isPlot(propType)) ||
+        (isCommercial(prefType) && isCommercial(propType)) ||
+        (isPgType(prefType) && isPgType(propType));
+
+      if (isTypeMatch) {
         totalMatchedPoints += weights.propertyType;
         matchedReasons.push(`Matches preferred property type (${property.propertyType})`);
       } else {
@@ -106,25 +135,36 @@ const calculatePropertyMatchScore = (property, preferences = {}, weights = DEFAU
   // 5. Budget / Max Price
   const rawMaxPrice = Number(preferences.maxPrice || preferences.budget || 0);
   if (rawMaxPrice > 0) {
-    if (!property.price || property.price <= 0) {
+    const pgMinPrice = (property.pgDetails?.rooms || []).reduce(
+      (min, r) => (r.pricePerPerson > 0 && r.pricePerPerson < min ? r.pricePerPerson : min),
+      999999
+    );
+    const effectivePrice = isPgProperty && pgMinPrice !== 999999 ? pgMinPrice : (property.price || 0);
+
+    if (effectivePrice <= 0) {
       unverifiedReasons.push("Pricing details");
     } else {
       totalPossiblePoints += weights.maxPrice;
-      if (property.price <= rawMaxPrice) {
+      if (effectivePrice <= rawMaxPrice) {
         totalMatchedPoints += weights.maxPrice;
-        const formattedPrice = property.price >= 10000000 
-          ? `₹${(property.price / 10000000).toFixed(2).replace(/\.00$/, "")} Cr`
-          : `₹${(property.price / 100000).toFixed(1).replace(/\.0$/, "")} L`;
+        const formattedPrice = effectivePrice >= 10000000
+          ? `₹${(effectivePrice / 10000000).toFixed(2).replace(/\.00$/, "")} Cr`
+          : effectivePrice >= 100000
+            ? `₹${(effectivePrice / 100000).toFixed(1).replace(/\.0$/, "")} L`
+            : `₹${effectivePrice.toLocaleString("en-IN")}`;
         matchedReasons.push(`Price is within budget (${formattedPrice})`);
       } else {
-        mismatchedReasons.push(`✕ Price exceeds budget (budget: ₹${(rawMaxPrice / 100000).toFixed(0)}L, price: ₹${(property.price / 100000).toFixed(0)}L)`);
+        const formattedMax = rawMaxPrice >= 100000 ? `₹${(rawMaxPrice / 100000).toFixed(0)}L` : `₹${rawMaxPrice.toLocaleString("en-IN")}`;
+        const formattedActual = effectivePrice >= 100000 ? `₹${(effectivePrice / 100000).toFixed(0)}L` : `₹${effectivePrice.toLocaleString("en-IN")}`;
+        mismatchedReasons.push(`✕ Price exceeds budget (budget: ${formattedMax}, price: ${formattedActual})`);
       }
     }
   }
 
-  // 6. BHK / Bedrooms
+  // 6. BHK / Bedrooms (Skip for PG / Co-Living & Commercial)
+  const isCommercialProperty = (t) => t.includes("commercial") || t.includes("office") || t.includes("shop") || t.includes("warehouse");
   const rawBedrooms = Number(preferences.bedrooms || preferences.bhk || 0);
-  if (rawBedrooms > 0) {
+  if (rawBedrooms > 0 && !isPgProperty && !isCommercialProperty(cleanStr(property.propertyType))) {
     if (property.bedrooms === undefined || property.bedrooms === null) {
       unverifiedReasons.push("BHK bedroom count");
     } else {
@@ -138,9 +178,9 @@ const calculatePropertyMatchScore = (property, preferences = {}, weights = DEFAU
     }
   }
 
-  // 7. Bathrooms
+  // 7. Bathrooms (Skip for PG)
   const rawBathrooms = Number(preferences.bathrooms || 0);
-  if (rawBathrooms > 0) {
+  if (rawBathrooms > 0 && !isPgProperty) {
     if (property.bathrooms === undefined || property.bathrooms === null) {
       unverifiedReasons.push("Bathroom count");
     } else {
