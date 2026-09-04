@@ -118,69 +118,81 @@ function isServiceAllowed(allowedServices, targetPurpose) {
  * Checks whether property coordinates fall inside ANY ACTIVE serviceable location
  * and whether propertyType and purpose are allowed in that area.
  */
-async function checkPropertyServiceability(propertyData) {
+/**
+ * Checks whether property coordinates or city/locality fall inside ANY ACTIVE serviceable location
+ * and whether propertyType and purpose are allowed in that area.
+ */
+async function checkPropertyServiceability(propertyDataInput, localityInput) {
+  let dataObj = {};
+  if (typeof propertyDataInput === "string") {
+    dataObj = {
+      city: propertyDataInput,
+      locality: localityInput || "",
+    };
+  } else if (propertyDataInput && typeof propertyDataInput === "object") {
+    dataObj = propertyDataInput;
+  }
+
   const activeLocations = await Location.find({ status: "active" });
 
   if (!activeLocations || activeLocations.length === 0) {
     return {
-      isServiceable: false,
-      code: "NO_SERVICEABLE_AREAS",
-      message: "We currently don't have any serviceable areas available.",
+      isServiceable: true,
+      matchedLocation: null,
+      distance: 0,
+      message: "All areas are serviceable by default.",
     };
   }
 
-  let latitude = Number(propertyData.latitude);
-  let longitude = Number(propertyData.longitude);
+  const targetCity = (dataObj.city || "").trim().toLowerCase();
+  const targetLocality = (dataObj.locality || "").trim().toLowerCase();
 
-  // If coordinates missing, attempt geocoding
+  // Check if targetCity directly matches an active serviceable city
+  const cityMatch = activeLocations.find(
+    (loc) => loc.city && loc.city.trim().toLowerCase() === targetCity
+  );
+
+  let latitude = Number(dataObj.latitude);
+  let longitude = Number(dataObj.longitude);
+
+  // If coordinates missing, attempt geocoding or fallback to matching city's center coordinates
   if (isNaN(latitude) || isNaN(longitude) || (latitude === 0 && longitude === 0)) {
-    const fullSearchQuery = [
-      propertyData.locality,
-      propertyData.city,
-      "India",
-    ]
-      .filter(Boolean)
-      .join(", ");
-
-    const geocoded = await geocodeAddress(fullSearchQuery);
-    if (geocoded) {
-      latitude = geocoded.latitude;
-      longitude = geocoded.longitude;
-    } else {
-      // Fallback: match by city name against active locations
-      const cityMatch = activeLocations.find(
-        (loc) => loc.city && loc.city.toLowerCase() === (propertyData.city || "").toLowerCase()
-      );
-      if (cityMatch) {
-        latitude = cityMatch.latitude;
-        longitude = cityMatch.longitude;
+    if (targetLocality && targetCity) {
+      const fullSearchQuery = `${dataObj.locality}, ${dataObj.city}, India`;
+      const geocoded = await geocodeAddress(fullSearchQuery);
+      if (geocoded) {
+        latitude = geocoded.latitude;
+        longitude = geocoded.longitude;
       }
     }
-  }
 
-  if (isNaN(latitude) || isNaN(longitude)) {
-    return {
-      isServiceable: false,
-      code: "AREA_NOT_SERVICEABLE",
-      message: "We currently don't provide service in this area.",
-    };
+    if ((isNaN(latitude) || isNaN(longitude) || (latitude === 0 && longitude === 0)) && cityMatch) {
+      latitude = cityMatch.latitude;
+      longitude = cityMatch.longitude;
+    }
   }
 
   // Calculate distance to each active serviceable location
   const matches = [];
 
   for (const loc of activeLocations) {
-    const dist = calculateDistanceKm(
-      latitude,
-      longitude,
-      loc.latitude,
-      loc.longitude
-    );
+    const isSameCity = loc.city && loc.city.trim().toLowerCase() === targetCity;
 
-    if (dist <= loc.radiusKm) {
+    let dist = Infinity;
+    if (!isNaN(latitude) && !isNaN(longitude) && latitude !== 0 && longitude !== 0) {
+      dist = calculateDistanceKm(
+        latitude,
+        longitude,
+        loc.latitude,
+        loc.longitude
+      );
+    }
+
+    // Match if within radius OR if city matches active serviceable city directly
+    if (dist <= loc.radiusKm || isSameCity) {
       matches.push({
         location: loc,
-        distance: dist,
+        distance: isFinite(dist) ? dist : 0,
       });
     }
   }
@@ -193,24 +205,24 @@ async function checkPropertyServiceability(propertyData) {
 
     // Check Property Type restriction
     if (
-      propertyData.propertyType &&
-      !isTypeAllowed(loc.propertyTypes, propertyData.propertyType)
+      dataObj.propertyType &&
+      !isTypeAllowed(loc.propertyTypes, dataObj.propertyType)
     ) {
       return {
         isServiceable: false,
         code: "PROPERTY_TYPE_NOT_ALLOWED",
-        message: `${propertyData.propertyType} listings are currently not allowed in ${loc.city}.`,
+        message: `${dataObj.propertyType} listings are currently not allowed in ${loc.city}.`,
       };
     }
 
     // Check Purpose (Allowed Services) restriction
     if (
-      propertyData.purpose &&
-      !isServiceAllowed(loc.allowedServices, propertyData.purpose)
+      dataObj.purpose &&
+      !isServiceAllowed(loc.allowedServices, dataObj.purpose)
     ) {
       const formattedPurpose =
-        propertyData.purpose.charAt(0).toUpperCase() +
-        propertyData.purpose.slice(1);
+        dataObj.purpose.charAt(0).toUpperCase() +
+        dataObj.purpose.slice(1);
       return {
         isServiceable: false,
         code: "SERVICE_NOT_ALLOWED",
@@ -222,15 +234,15 @@ async function checkPropertyServiceability(propertyData) {
       isServiceable: true,
       matchedLocation: loc,
       distance: nearest.distance,
-      latitude,
-      longitude,
+      latitude: latitude || loc.latitude,
+      longitude: longitude || loc.longitude,
     };
   }
 
   return {
     isServiceable: false,
     code: "AREA_NOT_SERVICEABLE",
-    message: "We currently don't provide service in this area.",
+    message: `Location ${dataObj.locality ? dataObj.locality + ", " : ""}${dataObj.city || "specified area"} is currently not in a serviceable area.`,
   };
 }
 

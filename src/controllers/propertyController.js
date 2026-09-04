@@ -110,7 +110,7 @@ const safeNumber = (
 
 const cleanPropertyDetails = (propertyType, body) => {
   const commonFields = [
-    "purpose", "propertyType", "ownerName", "ownerPhone", "ownerEmail", "ownerType",
+    "title", "isDraft", "purpose", "propertyType", "ownerName", "ownerPhone", "ownerEmail", "ownerType",
     "agentRelation", "ownerIdType", "ownerIdNumber", "ownerGovtIdDoc", "ownerAddress",
     "listingType", "city", "state", "locality", "society", "address", "latitude",
     "longitude", "serviceableAreaId", "price", "description", "availableFrom", "photos",
@@ -250,6 +250,7 @@ const cleanPropertyDetails = (propertyType, body) => {
   return cleaned;
 };
 
+exports.cleanPropertyDetails = cleanPropertyDetails;
 
 const SystemSettings = require("../models/SystemSettings");
 
@@ -552,9 +553,11 @@ exports.getProperties = async (req, res) => {
         } else if (/plot|land/i.test(pType)) {
           nearbyQuery.propertyType = { $regex: /plot|land/i };
         } else if (/commercial/i.test(pType)) {
-          nearbyQuery.propertyType = { $in: [
-            "Commercial Space", "Office Space", "Shop / Retail", "Warehouse", "Industrial Property", "Hotel / Resort"
-          ] };
+          nearbyQuery.propertyType = {
+            $in: [
+              "Commercial Space", "Office Space", "Shop / Retail", "Warehouse", "Industrial Property", "Hotel / Resort"
+            ]
+          };
         } else if (/builder|floor/i.test(pType)) {
           nearbyQuery.propertyType = { $regex: /builder|floor/i };
         } else if (/villa/i.test(pType)) {
@@ -2042,9 +2045,11 @@ exports.getNewProjects = async (req, res) => {
       } else if (/plot|land/i.test(pType)) {
         query.propertyType = { $regex: /plot|land/i };
       } else if (/commercial/i.test(pType)) {
-        query.propertyType = { $in: [
-          "Commercial Space", "Office Space", "Shop / Retail", "Warehouse", "Industrial Property", "Hotel / Resort"
-        ] };
+        query.propertyType = {
+          $in: [
+            "Commercial Space", "Office Space", "Shop / Retail", "Warehouse", "Industrial Property", "Hotel / Resort"
+          ]
+        };
       } else if (/villa/i.test(pType)) {
         query.propertyType = { $regex: /villa/i };
       } else {
