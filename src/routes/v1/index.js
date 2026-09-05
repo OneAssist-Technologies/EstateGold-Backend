@@ -7,6 +7,7 @@
  *   /api/v1/users           — User profile & settings
  *   /api/v1/properties      — Property CRUD, search, filter, drafts
  *   /api/v1/enquiries       — Enquiry/callback requests
+ *   /api/v1/loan-enquiries  — Home loan enquiry & CRM webhook integration
  *   /api/v1/uploads         — Document uploads
  *   /api/v1/locations       — Location data
  *   /api/v1/ai              — AI features (description, compare, search, eyva)
@@ -23,6 +24,7 @@ const authRoutes = require("./auth.routes");
 const userRoutes = require("./user.routes");
 const propertyRoutes = require("./property.routes");
 const enquiryRoutes = require("./enquiry.routes");
+const loanEnquiryRoutes = require("./loan-enquiry.routes");
 const uploadRoutes = require("./upload.routes");
 const locationRoutes = require("./location.routes");
 const aiRoutes = require("./ai.routes");
@@ -37,6 +39,7 @@ router.use("/auth", authRoutes);
 router.use("/users", userRoutes);
 router.use("/properties", propertyRoutes);
 router.use("/enquiries", enquiryRoutes);
+router.use("/loan-enquiries", loanEnquiryRoutes);
 router.use("/uploads", uploadRoutes);
 router.use("/locations", locationRoutes);
 router.use("/ai", aiRoutes);
