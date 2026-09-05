@@ -17,6 +17,7 @@ const locationRoutes = require("./src/routes/locationRoutes");
 const marketInsightRoutes = require("./src/routes/marketInsightRoutes");
 const aiRoutes = require("./src/routes/aiRoutes");
 const enquiryRoutes = require("./src/routes/enquiryRoutes");
+const loanEnquiryRoutes = require("./src/routes/v1/loan-enquiry.routes");
 
 const app = express();
 
@@ -58,6 +59,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api", authRoutes);
 app.use("/api", propertyRoutes);
 app.use("/api", enquiryRoutes);
+app.use("/api/loan-enquiries", loanEnquiryRoutes);
 app.use("/api/locations", locationRoutes);
 app.use("/api/market-insight", marketInsightRoutes);
 app.use("/api/ai", aiRoutes);
